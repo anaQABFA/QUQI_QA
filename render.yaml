@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: qa-certifica
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL        # cadena de conexión de Neon (la pegas tú en Render)
+        sync: false
+      - key: ADMIN_USER          # usuario del primer administrador
+        value: ana
+      - key: ADMIN_NAME
+        value: Ana Cortés
+      - key: ADMIN_PASSWORD      # clave inicial del administrador (solo se usa si la base no tiene usuarios)
+        sync: false
+      - key: GEMINI_API_KEY      # llave de Google AI Studio (opcional: sin ella la IA queda apagada)
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash

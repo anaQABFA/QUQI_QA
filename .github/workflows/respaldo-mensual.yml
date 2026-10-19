@@ -1,0 +1,24 @@
+# Respaldo automático: el día 1 de cada mes (y cuando lo ejecutes a mano en la pestaña Actions).
+# Genera un archivo JSON con toda la base y lo deja como "artefacto" descargable por 90 días.
+# REQUISITO: el repositorio debe ser PRIVADO y tener el secreto DATABASE_URL (Settings → Secrets and variables → Actions).
+name: Respaldo mensual
+on:
+  schedule:
+    - cron: '0 11 1 * *'
+  workflow_dispatch:
+jobs:
+  respaldo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci --omit=dev
+      - run: node scripts/backup.js respaldo.json
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qa-certifica-respaldo-${{ github.run_id }}
+          path: respaldo.json
+          retention-days: 90

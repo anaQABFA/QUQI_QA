@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>QA Certifica · Ingreso</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/base.css">
+<style>
+ .shell{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+ .box{width:100%;max-width:400px}
+ .brand{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+ .mark{width:44px;height:44px;border-radius:12px;background:var(--alt);display:flex;align-items:center;justify-content:center;font-size:24px}
+ .brand p{margin:0;font-size:12.5px;color:var(--sec)}
+ button.primary{width:100%;margin-top:18px;padding:11px}
+ .hide{display:none}
+</style></head><body>
+<div class="shell"><div class="box card">
+  <div class="brand"><div class="mark">🧪</div><div><h1>QA Certifica</h1><p>Banco Finandina · Certificación de entregas</p></div></div>
+
+  <form id="fLogin" autocomplete="on">
+    <label for="u">Usuario</label><input id="u" name="username" autocomplete="username" autocapitalize="none" required>
+    <label for="p">Contraseña</label><input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button class="primary" id="bLogin" type="submit">Ingresar</button>
+  </form>
+
+  <form id="fChange" class="hide" autocomplete="off">
+    <h2 style="font-size:16px;margin-bottom:4px">Cambia tu contraseña</h2>
+    <p class="small" style="margin:0 0 4px" id="chgNote">Elige una contraseña propia de al menos 10 caracteres, con letras y números.</p>
+    <label for="c0">Contraseña actual</label><input id="c0" type="password" autocomplete="current-password" required>
+    <label for="c1">Nueva contraseña</label><input id="c1" type="password" autocomplete="new-password" required>
+    <label for="c2">Repite la nueva contraseña</label><input id="c2" type="password" autocomplete="new-password" required>
+    <button class="primary" id="bChange" type="submit">Guardar contraseña</button>
+    <p class="small" style="text-align:center;margin:12px 0 0"><a href="/" id="skip">Cancelar</a></p>
+  </form>
+  <div class="msg" id="msg" role="status"></div>
+</div></div>
+<script>
+const $ = id => document.getElementById(id), msg = (t, c) => { $('msg').textContent = t || ''; $('msg').className = 'msg ' + (c || ''); };
+async function post(url, body){
+  const r = await fetch(url, { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || 'No se pudo completar la solicitud.');
+  return j;
+}
+function showChange(forced){
+  $('fLogin').classList.add('hide'); $('fChange').classList.remove('hide');
+  if(forced){ $('skip').classList.add('hide'); $('chgNote').textContent = 'Es tu primer ingreso (o el administrador restableció tu clave): elige una contraseña propia de al menos 10 caracteres, con letras y números.'; }
+  $('c0').focus();
+}
+$('fLogin').addEventListener('submit', async e => {
+  e.preventDefault(); $('bLogin').disabled = true; msg('Verificando…');
+  try{
+    const r = await post('/api/login', { username: $('u').value, password: $('p').value });
+    if(r.mustChange){ $('c0').value = $('p').value; msg(''); showChange(true); }
+    else location.href = new URLSearchParams(location.search).get('change') ? '/login.html?change=1' : '/';
+  }catch(err){ msg(err.message, 'err'); }
+  $('bLogin').disabled = false;
+});
+$('fChange').addEventListener('submit', async e => {
+  e.preventDefault();
+  if($('c1').value !== $('c2').value) return msg('Las contraseñas nuevas no coinciden.', 'err');
+  $('bChange').disabled = true; msg('Guardando…');
+  try{ await post('/api/password', { current: $('c0').value, next: $('c1').value }); msg('Listo. Entrando…', 'ok'); setTimeout(() => location.href = '/', 600); }
+  catch(err){ msg(err.message, 'err'); }
+  $('bChange').disabled = false;
+});
+(async () => {
+  let me = null;
+  try{ const r = await fetch('/api/me', { credentials:'same-origin' }); if(r.ok) me = await r.json(); }catch(e){}
+  const wantChange = new URLSearchParams(location.search).get('change');
+  if(me && me.user.mustChange) showChange(true);
+  else if(me && wantChange) showChange(false);
+  else if(me) location.href = '/';
+  else $('u').focus();
+})();
+</script></body></html>

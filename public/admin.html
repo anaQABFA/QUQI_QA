@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>QA Certifica · Administración</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="/base.css">
+<style>
+ .wrap{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+ .top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+ section{margin-bottom:18px}
+ section h2{font-size:17px;margin-bottom:4px}
+ table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:10px}
+ th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--border)}
+ td{padding:8px;border-bottom:1px solid var(--border);vertical-align:middle}
+ .tbl{overflow-x:auto}
+ .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;align-items:end}
+ .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;background:var(--alt)}
+ .pill.on{color:var(--good)}.pill.off{color:var(--crit)}.pill.adm{color:var(--accent-s)}
+ td button{padding:4px 9px;font-size:12.5px;margin-right:4px}
+ .banner{padding:10px 12px;border-radius:10px;background:rgba(250,178,25,.16);color:var(--warn);font-size:13.5px;margin-bottom:12px}
+ .flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+</style></head><body>
+<div class="wrap">
+  <div class="top"><div><h1>Administración</h1><p class="small" style="margin:2px 0 0">QA Certifica · usuarios, respaldo y estado de la IA</p></div><a href="/">← Volver al tablero</a></div>
+  <div id="bkBanner"></div>
+
+  <section class="card"><h2>Usuarios</h2>
+    <p class="small" style="margin:0">Cada analista entra con su usuario y contraseña. Al crear o restablecer una clave, la persona debe cambiarla en su primer ingreso.</p>
+    <div class="tbl"><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Último ingreso</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
+    <h3 style="font-size:14px;margin-top:20px">Nuevo usuario</h3>
+    <form id="fNew" class="row" autocomplete="off">
+      <div><label for="nu">Usuario</label><input id="nu" placeholder="ej. jperez" required></div>
+      <div><label for="nn">Nombre completo</label><input id="nn" placeholder="Juan Pérez" required></div>
+      <div><label for="np">Contraseña temporal</label><input id="np" type="text" placeholder="mín. 10, letras y números" required></div>
+      <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista</option><option value="admin">Administrador</option></select></div>
+      <div><button class="primary" type="submit" style="width:100%">Crear usuario</button></div>
+    </form>
+    <div class="msg" id="msgU"></div>
+  </section>
+
+  <section class="card"><h2>Respaldo</h2>
+    <p class="small" style="margin:0">Descarga una copia de todos los datos (proyectos, seguimiento, bitácora, ambientes y configuración). Hazlo al menos una vez al mes y guarda el archivo en una carpeta corporativa. <strong>El JSON</strong> sirve para restaurar; <strong>el Excel</strong> es para consultar.</p>
+    <p class="small" id="bkLast" style="margin:8px 0 0"></p>
+    <div class="flex"><button class="primary" id="bJson">Descargar respaldo (JSON)</button><button id="bXlsx">Descargar respaldo (Excel)</button></div>
+    <div class="msg" id="msgB"></div>
+    <h3 style="font-size:14px;margin-top:18px">Restaurar desde un archivo</h3>
+    <p class="small" style="margin:2px 0 8px">Sirve para recuperar datos o migrar un respaldo JSON. «Combinar» agrega y actualiza sin borrar lo que ya existe; «Reemplazar» deja cada colección exactamente como el archivo (borra lo que no esté en él).</p>
+    <div class="row"><div><label for="rf">Archivo .json</label><input id="rf" type="file" accept=".json,application/json"></div>
+    <div><label for="rm">Modo</label><select id="rm"><option value="merge">Combinar (recomendado)</option><option value="replace">Reemplazar</option></select></div>
+    <div><button id="bRestore" style="width:100%">Restaurar</button></div></div>
+    <div class="msg" id="msgR"></div>
+  </section>
+
+  <section class="card"><h2>Inteligencia artificial</h2>
+    <p id="aiState" class="small" style="margin:6px 0 0"></p>
+  </section>
+</div>
+<script src="/vendor/xlsx.full.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const say = (id, t, c) => { $(id).textContent = t || ''; $(id).className = 'msg ' + (c || ''); };
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(method, url, body){
+  const r = await fetch(url, { method, credentials:'same-origin', headers: body !== undefined ? {'Content-Type':'application/json'} : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+  if(r.status === 401){ location.href = '/login.html'; throw new Error('Sesión vencida'); }
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || 'No se pudo completar la solicitud.');
+  return j;
+}
+const fmt = s => s ? new Date(s).toLocaleString('es-CO', { dateStyle:'medium', timeStyle:'short' }) : '—';
+let me = null;
+
+async function loadMe(){
+  me = await api('GET', '/api/me');
+  const b = me.backup;
+  $('bkLast').textContent = b && b.last ? 'Último respaldo descargado: ' + fmt(b.last) + ' (hace ' + b.days + ' días).' : 'Todavía no se ha descargado ningún respaldo desde esta página.';
+  $('bkBanner').innerHTML = b && b.due ? '<div class="banner">💾 Toca el respaldo mensual: ' + (b.days == null ? 'aún no hay ninguno.' : 'el último fue hace ' + b.days + ' días.') + '</div>' : '';
+  $('aiState').innerHTML = me.ai.enabled ? 'Activada · modelo <strong>' + esc(me.ai.model) + '</strong> (Google Gemini). La llave está guardada como variable secreta del servidor y nunca llega al navegador.'
+    : 'Desactivada: falta la variable <code>GEMINI_API_KEY</code> en Render. Mientras tanto, las HU se pueden cargar desde tablas de Excel (sin IA) o manualmente.';
+}
+async function loadUsers(){
+  const us = await api('GET', '/api/admin/users');
+  $('users').innerHTML = us.map(u => `<tr>
+    <td><strong>${esc(u.username)}</strong></td><td>${esc(u.name)}</td>
+    <td><span class="pill ${u.role === 'admin' ? 'adm' : ''}">${u.role === 'admin' ? 'Administrador' : 'Analista'}</span></td>
+    <td><span class="pill ${u.active ? 'on' : 'off'}">${u.active ? 'Activo' : 'Inactivo'}</span>${u.must_change ? ' <span class="pill">cambio pendiente</span>' : ''}</td>
+    <td>${fmt(u.last_login)}</td>
+    <td style="white-space:nowrap"><button data-a="pw" data-id="${u.id}">Restablecer clave</button><button data-a="act" data-id="${u.id}" data-v="${u.active ? 0 : 1}">${u.active ? 'Desactivar' : 'Activar'}</button><button data-a="role" data-id="${u.id}" data-v="${u.role === 'admin' ? 'analista' : 'admin'}">${u.role === 'admin' ? 'Quitar admin' : 'Hacer admin'}</button></td></tr>`).join('');
+}
+$('users').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if(!b) return;
+  const id = b.dataset.id; say('msgU', '');
+  try{
+    if(b.dataset.a === 'pw'){
+      const pw = prompt('Nueva contraseña temporal (mín. 10 caracteres, letras y números). La persona deberá cambiarla al ingresar:');
+      if(!pw) return; await api('PATCH', '/api/admin/users/' + id, { password: pw }); say('msgU', 'Contraseña restablecida. Compártela por un canal seguro.', 'ok');
+    } else if(b.dataset.a === 'act'){
+      await api('PATCH', '/api/admin/users/' + id, { active: b.dataset.v === '1' });
+    } else if(b.dataset.a === 'role'){
+      await api('PATCH', '/api/admin/users/' + id, { role: b.dataset.v });
+    }
+    await loadUsers();
+  }catch(err){ say('msgU', err.message, 'err'); }
+});
+$('fNew').addEventListener('submit', async e => {
+  e.preventDefault(); say('msgU', '');
+  try{
+    await api('POST', '/api/admin/users', { username: $('nu').value, name: $('nn').value, password: $('np').value, role: $('nr').value });
+    say('msgU', 'Usuario creado. Comparte usuario y contraseña temporal por un canal seguro.', 'ok'); $('fNew').reset(); await loadUsers();
+  }catch(err){ say('msgU', err.message, 'err'); }
+});
+
+function download(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
+const today = () => new Date().toISOString().slice(0, 10);
+async function backupJson(){
+  say('msgB', 'Preparando…');
+  const cols = await api('GET', '/api/admin/backup-data');
+  const out = { app:'qa-certifica', formato:1, exportadoEn:new Date().toISOString(), exportadoPor:me.user.username, collections: cols };
+  download(new Blob([JSON.stringify(out)], { type:'application/json' }), 'qa-certifica-respaldo-' + today() + '.json');
+  return cols;
+}
+$('bJson').addEventListener('click', async () => {
+  try{ await backupJson(); await api('POST', '/api/admin/backup-done', {}); await loadMe(); say('msgB', 'Respaldo descargado.', 'ok'); }
+  catch(err){ say('msgB', err.message, 'err'); }
+});
+function flat(v){ if(v == null) return ''; if(typeof v === 'object'){ const s = JSON.stringify(v); return s.length > 32000 ? s.slice(0, 32000) + '…' : s; } return v; }
+$('bXlsx').addEventListener('click', async () => {
+  try{
+    say('msgB', 'Preparando…');
+    const cols = await api('GET', '/api/admin/backup-data'), wb = XLSX.utils.book_new();
+    Object.keys(cols).forEach(c => {
+      const docs = cols[c], ids = Object.keys(docs); if(!ids.length) return;
+      const keys = []; ids.forEach(id => Object.keys(docs[id]).forEach(k => { if(keys.indexOf(k) < 0) keys.push(k); }));
+      const rows = [['id'].concat(keys)].concat(ids.map(id => [id].concat(keys.map(k => flat(docs[id][k])))));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), c.slice(0, 31));
+    });
+    const buf = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+    download(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'qa-certifica-respaldo-' + today() + '.xlsx');
+    await api('POST', '/api/admin/backup-done', {}); await loadMe(); say('msgB', 'Excel descargado (una hoja por colección). Para restaurar usa el JSON.', 'ok');
+  }catch(err){ say('msgB', err.message, 'err'); }
+});
+$('bRestore').addEventListener('click', async () => {
+  const f = $('rf').files[0]; if(!f) return say('msgR', 'Elige primero un archivo .json.', 'err');
+  const mode = $('rm').value;
+  if(mode === 'replace' && !confirm('«Reemplazar» borrará de cada colección todo lo que no esté en el archivo. ¿Continuar?')) return;
+  try{
+    say('msgR', 'Leyendo archivo…'); const j = JSON.parse(await f.text());
+    say('msgR', 'Restaurando…'); const r = await api('POST', '/api/admin/restore', { collections: j.collections, app: j.app, mode });
+    say('msgR', 'Listo: ' + r.escritos + ' documentos escritos' + (r.borrados ? ', ' + r.borrados + ' borrados' : '') + '. ' + Object.keys(r.colecciones).map(c => c + ' ' + r.colecciones[c]).join(' · '), 'ok');
+  }catch(err){ say('msgR', err.message === 'Unexpected end of JSON input' || /JSON/.test(err.message) ? 'El archivo no es un JSON válido.' : err.message, 'err'); }
+});
+Promise.all([loadMe(), loadUsers()]).catch(e => say('msgU', e.message, 'err'));
+</script></body></html>

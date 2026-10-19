@@ -1,0 +1,20 @@
+{
+  "name": "qa-certifica",
+  "version": "1.0.0",
+  "description": "QA Certifica — tablero de certificación de entregas de QA (Banco Finandina)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "backup": "node scripts/backup.js",
+    "import": "node scripts/import.js"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^4.22.3",
+    "pg": "^8.23.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  }
+}
