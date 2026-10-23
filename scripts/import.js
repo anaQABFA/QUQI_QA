@@ -8,7 +8,7 @@ const store = require('../lib/store');
   const file = process.argv[2];
   if (!file) { console.error('Uso: node scripts/import.js archivo.json [--reemplazar] [--con-usuarios]'); process.exit(1); }
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-  if (!j.collections) throw new Error('El archivo no parece un respaldo de QA Certifica.');
+  if (!j.collections) throw new Error('El archivo no parece un respaldo de QUQI_QA.');
   await db.init();
   const r = await store.restoreDocs(j.collections, process.argv.includes('--reemplazar') ? 'replace' : 'merge', 'import.js');
   console.log('Documentos escritos: ' + r.escritos + (r.borrados ? ', borrados: ' + r.borrados : ''), r.colecciones);

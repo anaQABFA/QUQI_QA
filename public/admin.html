@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>QA Certifica · Administración</title>
+<title>QUQI_QA · Administración</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="/base.css">
 <style>
@@ -20,7 +20,7 @@
  .flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
 </style></head><body>
 <div class="wrap">
-  <div class="top"><div><h1>Administración</h1><p class="small" style="margin:2px 0 0">QA Certifica · usuarios, respaldo y estado de la IA</p></div><a href="/">← Volver al tablero</a></div>
+  <div class="top"><div><h1>Administración</h1><p class="small" style="margin:2px 0 0">QUQI_QA · usuarios, respaldo y estado de la IA</p></div><a href="/">← Volver al tablero</a></div>
   <div id="bkBanner"></div>
 
   <section class="card"><h2>Usuarios</h2>
@@ -114,8 +114,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 async function backupJson(){
   say('msgB', 'Preparando…');
   const cols = await api('GET', '/api/admin/backup-data');
-  const out = { app:'qa-certifica', formato:1, exportadoEn:new Date().toISOString(), exportadoPor:me.user.username, collections: cols };
-  download(new Blob([JSON.stringify(out)], { type:'application/json' }), 'qa-certifica-respaldo-' + today() + '.json');
+  const out = { app:'quqi-qa', formato:1, exportadoEn:new Date().toISOString(), exportadoPor:me.user.username, collections: cols };
+  download(new Blob([JSON.stringify(out)], { type:'application/json' }), 'quqi-qa-respaldo-' + today() + '.json');
   return cols;
 }
 $('bJson').addEventListener('click', async () => {
@@ -134,7 +134,7 @@ $('bXlsx').addEventListener('click', async () => {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), c.slice(0, 31));
     });
     const buf = XLSX.write(wb, { type:'array', bookType:'xlsx' });
-    download(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'qa-certifica-respaldo-' + today() + '.xlsx');
+    download(new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'quqi-qa-respaldo-' + today() + '.xlsx');
     await api('POST', '/api/admin/backup-done', {}); await loadMe(); say('msgB', 'Excel descargado (una hoja por colección). Para restaurar usa el JSON.', 'ok');
   }catch(err){ say('msgB', err.message, 'err'); }
 });

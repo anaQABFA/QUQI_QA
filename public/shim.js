@@ -122,6 +122,12 @@
     }
   };
 
+  /* ---------- Azure DevOps (solo lectura; la llave vive en el servidor) ---------- */
+  const azureNS = {
+    test: cfg => api('POST', '/api/azure/test', cfg || {}),
+    sync: (id, force) => api('POST', '/api/azure/sync/' + encodeURIComponent(id), { force: !!force })
+  };
+
   /* ---------- sesión / usuario ---------- */
   const meP = api('GET', '/api/me').then(me => {
     window.__me = me;
@@ -153,6 +159,7 @@
       if(name === 'db'){ startStream(); return dbNS; }
       if(name === 'sample') return me.ai && me.ai.enabled ? sampleNS : null;
       if(name === 'downloads') return dlNS;
+      if(name === 'azure') return me.azure && me.azure.enabled ? azureNS : null;
       return null;
     }
   };

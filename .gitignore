@@ -7,3 +7,7 @@ qa-certifica-respaldo*.json
 qa-certifica-backup*.json
 respaldo.json
 backup-*.json
+
+quqi-qa-datos*
+quqi-qa-respaldo*
+quqi-qa-backup*

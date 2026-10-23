@@ -19,6 +19,6 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - uses: actions/upload-artifact@v4
         with:
-          name: qa-certifica-respaldo-${{ github.run_id }}
+          name: quqi-qa-respaldo-${{ github.run_id }}
           path: respaldo.json
           retention-days: 90

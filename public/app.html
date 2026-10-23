@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%A7%AA%3C/text%3E%3C/svg%3E"></head><body>
-<title>QA Certifica</title>
+<title>QUQI_QA</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
 <style>
   :root{
@@ -361,6 +361,35 @@
   .chipbtn{ border:1px solid var(--border); background:var(--surface); color:var(--text-secondary); border-radius:999px; padding:4px 11px; font-size:12px; cursor:pointer; font-family:inherit; }
   .chipbtn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .seg-entry.t-nota{ border-left-color:var(--gridline); }
+  .seg-entry.t-coment{ border-left-color:#0f9fb5; }
+  :root{ --alc-ink:#6d3fd1; --alc-bg:rgba(109,63,209,0.12); }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --alc-ink:#b9a2ff; --alc-bg:rgba(185,162,255,0.16); } }
+  :root[data-theme="dark"]{ --alc-ink:#b9a2ff; --alc-bg:rgba(185,162,255,0.16); }
+  .badge-alcance{ background:var(--alc-bg); color:var(--alc-ink); }
+  .az-chip{ display:inline-block; padding:2px 9px; border-radius:999px; border:1px solid var(--border); font-size:12px; margin:2px 4px 2px 0; }
+  .az-chip b{ font-weight:700; }
+  .az-link{ color:var(--accent-strong); font-weight:600; text-decoration:none; }
+  .badge-alcance .dot{ background:var(--alc-ink); }
+  /* selector de estado de cada criterio (se ve como una pastilla) */
+  .cstate{ -webkit-appearance:none; appearance:none; border:none; border-radius:999px; padding:4px 26px 4px 22px; font-size:11.5px; font-weight:700; font-family:inherit; cursor:pointer; width:auto; min-width:0; max-width:100%;
+    background-repeat:no-repeat; background-size:10px, 100% 100%; background-position:right 9px center, 0 0;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23898781' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"), radial-gradient(circle at 11px 50%, currentColor 3.5px, transparent 4.2px); }
+  .cstate:disabled{ cursor:default; opacity:.85; }
+  .cstate option{ color:var(--text); background:var(--surface); font-weight:600; }
+  .cstate.s-pendiente{ background-color:var(--surface-alt); color:var(--text-secondary); }
+  .cstate.s-recibido{ background-color:rgba(12,163,12,0.12); color:var(--good); }
+  .cstate.s-alcance{ background-color:var(--alc-bg); color:var(--alc-ink); }
+  .cstate.s-no_aplica,.cstate.s-desistido{ background-color:var(--surface-alt); color:var(--text-muted); }
+  .ctag{ margin-top:4px; font-size:12px; color:var(--alc-ink); display:flex; gap:8px; flex-wrap:wrap; align-items:baseline; }
+  .critform{ grid-column:1 / -1; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--surface-alt); }
+  .critform textarea{ width:100%; }
+  /* módulo de comentarios de cada HU */
+  .comment{ border:1px solid var(--border); border-left:3px solid #0f9fb5; border-radius:8px; padding:8px 10px; margin:6px 0; background:var(--surface); }
+  .comment .ct{ white-space:pre-wrap; font-size:13px; }
+  .comment .cm{ margin-top:4px; font-size:11.5px; color:var(--text-muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .cform{ display:grid; grid-template-columns:minmax(150px,230px) 1fr auto; gap:8px; align-items:start; margin-top:8px; }
+  .cform textarea{ width:100%; }
+  @media (max-width:620px){ .cform{ grid-template-columns:1fr; } }
   .seg-entry .sh{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:space-between; }
   .seg-entry .sb{ margin-top:4px; color:var(--text-secondary); font-size:13px; white-space:pre-wrap; }
   .seg-entry .sm{ margin-top:4px; font-size:11.5px; color:var(--text-muted); }
@@ -372,7 +401,7 @@
     <div class="brand">
       <div class="brand-mark">🧪</div>
       <div>
-        <h1>QA Certifica</h1>
+        <h1>QUQI_QA</h1>
         <p>Banco Finandina · Certificación de entregas de desarrollo</p>
       </div>
     </div>
@@ -392,12 +421,12 @@
 
 <dialog id="howDialog">
   <div class="dialog-inner">
-    <h3>Cómo funciona QA Certifica</h3>
+    <h3>Cómo funciona QUQI_QA</h3>
     <p><strong>1. Nuevo proyecto.</strong> Subes el Excel, PDF o PowerPoint del requerimiento. Un asistente de IA (Gemini) detecta las historias de usuario (HU) y sus criterios de aceptación. Cada HU tiene un peso sobre el 100% del proyecto y cada criterio tiene su propio peso dentro de la HU; todo se puede editar antes de guardar.</p>
     <p><strong>2. Seguimiento.</strong> A medida que QA recibe cada criterio, el % de entrega del proyecto sube según su peso. El tablero acumula el avance por semana y por mes.</p>
     <p><strong>3. Certificación y ANS.</strong> Al llegar al 100% importas los bugs del proyecto (export de Azure Boards) y la herramienta calcula el cumplimiento de los ANS por HU y del proyecto, con los tiempos que se definen en la pestaña “Azure y ANS”.</p>
     <p><strong>4. Bitácora.</strong> Cada analista registra su jornada hora por hora (probando, bloqueado, reunión…) y puede asociar los bugs que reportó con los minutos invertidos.</p>
-    <p><strong>Sobre Azure DevOps:</strong> hoy la conexión es por importación de archivos. La conexión en vivo con Azure DevOps no está incluida en esta versión; esta página no guarda ni pide tokens.</p>
+    <p><strong>Sobre Azure DevOps:</strong> hoy la conexión es por importación de archivos. Si el administrador configuró la llave de Azure DevOps en el servidor, cada proyecto puede traer sus bugs en vivo (solo lectura); esta página nunca guarda ni pide tokens en el navegador.</p>
     <div class="flexend"><button class="btn btn-primary" id="closeHowDialog" type="button">Entendido</button></div>
   </div>
 </dialog>
@@ -488,7 +517,7 @@ function normalizeHU(h0){
   let cr = Array.isArray(h.criterios) ? h.criterios : [];
   cr = cr.map(c => (typeof c==='string')
     ? { texto:c, pesoPct:null, recibido:legacyReceived, recibidoEn: legacyReceived ? (h.recibidaEn||null) : null }
-    : { texto:String(c.texto||''), pesoPct:toNumOrNull(c.pesoPct), recibido:!!c.recibido, recibidoEn:c.recibidoEn||null, excluido:c.excluido||null, motivo:String(c.motivo||''), excluidoEn:c.excluidoEn||null });
+    : { texto:String(c.texto||''), pesoPct:toNumOrNull(c.pesoPct), recibido:!!c.recibido, recibidoEn:c.recibidoEn||null, excluido:c.excluido||null, motivo:String(c.motivo||''), excluidoEn:c.excluidoEn||null, alcance:!!c.alcance, cambio:(c.cambio && typeof c.cambio==='object') ? c.cambio : null });
   if(cr.length && cr.some(c => c.pesoPct==null)){ const sh = equalShares(cr.length); cr.forEach((c,i) => { c.pesoPct = sh[i]; }); }
   h.criterios = cr;
   h.excluido = h.excluido || null; h.motivo = String(h.motivo||'');
@@ -547,13 +576,31 @@ function deliveryEvents(p){
 function setHUReceived(h, val, nowIso){
   if(isHUExcluded(h)) return h;
   const cr = activeCrit(h);
-  if((h.criterios||[]).length){ cr.forEach(c => { c.recibido = val; c.recibidoEn = val ? (c.recibidoEn || nowIso) : null; }); }
+  if((h.criterios||[]).length){ cr.forEach(c => { c.recibido = val; c.recibidoEn = val ? (c.recibidoEn || nowIso) : null; if(val) c.alcance = false; }); }
   else { h.estado = val ? 'recibida' : 'pendiente'; h.recibidaEn = val ? (h.recibidaEn || nowIso) : null; }
   return syncHUStatus(h);
 }
 function setCritReceived(h, ci, val, nowIso){
   const c = h.criterios[ci]; if(!c || c.excluido) return h;
-  c.recibido = val; c.recibidoEn = val ? (c.recibidoEn || nowIso) : null;
+  c.recibido = val; c.recibidoEn = val ? (c.recibidoEn || nowIso) : null; if(val) c.alcance = false;
+  return syncHUStatus(h);
+}
+/* Estado de un criterio: pendiente | recibido | alcance (texto cambiado, por volver a probar) | no_aplica | desistido */
+function critState(c){ if(c.excluido) return c.excluido==='desistido' ? 'desistido' : 'no_aplica'; if(c.recibido) return 'recibido'; return c.alcance ? 'alcance' : 'pendiente'; }
+const CRIT_STATE_LABEL = {pendiente:'Pendiente', recibido:'Recibido', alcance:'Cambio de alcance', no_aplica:'No aplica', desistido:'Desistido'};
+function huStateLabel(h){ if(isHUExcluded(h)) return 'Excluida'; return h.estado==='recibida' ? 'Recibida' : h.estado==='parcial' ? 'Parcial' : 'Pendiente'; }
+function setCritState(h, ci, estado, nowIso){
+  const c = h.criterios[ci]; if(!c || c.excluido) return h;
+  if(estado==='recibido'){ c.recibido = true; c.recibidoEn = c.recibidoEn || nowIso; c.alcance = false; }
+  else { c.recibido = false; c.recibidoEn = null; c.alcance = false; }
+  return syncHUStatus(h);
+}
+/* Cambio de alcance: se edita el texto del criterio, vuelve a pendiente de prueba y queda el historial (texto original, fecha y motivo). */
+function changeCritScope(h, ci, nuevoTexto, motivo, nowIso){
+  const c = h.criterios[ci];
+  const antes = (c.cambio && c.cambio.antes) ? c.cambio.antes : c.texto;
+  c.cambio = { antes, previo:c.texto, en:nowIso, motivo:String(motivo||'') };
+  c.texto = nuevoTexto; c.recibido = false; c.recibidoEn = null; c.alcance = true;
   return syncHUStatus(h);
 }
 /* Valida: HU suman 100% y los criterios de cada HU suman 100%. */
@@ -593,6 +640,7 @@ const SEG_TIPOS = [
   {k:'congelado', label:'Congelado por prioridad de otro proyecto', cls:'t-congelado'},
   {k:'certificado_qa', label:'Certificado QA', cls:'t-certqa'},
   {k:'amb_bloqueado', label:'Bloqueado por ambiente', cls:'t-ambiente'},
+  {k:'comentario', label:'Comentario', cls:'t-coment'},
   {k:'nota', label:'Nota del día', cls:'t-nota'},
   {k:'reanudado', label:'Reanudado', cls:'t-alcance'},
   {k:'reactivado', label:'Reactivado', cls:'t-alcance'}
@@ -734,6 +782,7 @@ function novedadRow(e, fz){
     case 'desistido': detalle = 'Se desistió ' + (e.crit!=null ? 'un criterio' : 'la HU'); motivo = [e.critTexto, e.texto ? 'Motivo: ' + e.texto : ''].filter(Boolean).join(' — '); break;
     case 'no_aplica': detalle = (e.crit!=null ? 'Criterio' : 'HU') + ' no aplicable'; motivo = [e.critTexto, e.texto ? 'Motivo: ' + e.texto : ''].filter(Boolean).join(' — '); break;
     case 'reactivado': detalle = 'Reactivado'; motivo = e.critTexto || ''; break;
+    case 'comentario': detalle = 'Comentario'; motivo = e.texto || ''; estado = e.estadoCrit ? (e.crit!=null ? 'Criterio ' : 'HU ') + e.estadoCrit : ''; break;
     case 'congelado': {
       detalle = 'Congelado por prioridad de ' + (e.prioProyecto || 'otro proyecto');
       const iv = fz && fz.intervals.find(i => i.desde===e.fecha);
@@ -795,8 +844,30 @@ function novedadesBrief(entries){
     out.push({label:'Ambiente', text: pl(ab.count, 'bloqueo', 'bloqueos') + (ab.minutes ? ' (' + fmtMinutes(ab.minutes) + ' en total)' : '') + (ab.open ? ', ' + ab.open + ' sin hora fin' : '') + (iss.length ? '. Issues: ' + iss.join(', ') : '') + '.'});
   }
   const cq = n('certificado_qa'); if(cq.length){ const c = cq[cq.length-1].cq || {}; out.push({label:'Certificado QA', text: cqNum(c.casosOk) + ' de ' + cqNum(c.casosDis) + ' casos ejecutados con éxito; ' + pl(cqBugTotal(c), 'bug', 'bugs') + ' identificados.'}); }
+  const co = n('comentario'); if(co.length) out.push({label:'Comentarios', text: pl(co.length, 'comentario', 'comentarios') + ' sobre HU y criterios.'});
   const no = n('nota'); if(no.length) out.push({label:'Notas', text: pl(no.length, 'nota del día', 'notas del día') + '.'});
   return out;
+}
+/* Alcance: del requerimiento original (lo que definió el dueño) al alcance final tras cambios y ajustes, y cuánto de eso se entregó. */
+function alcanceInfo(p, entries){
+  const hs = p.historias || [], ev = entries || [];
+  const nCr = h => (h.criterios||[]).length;
+  const totHU = hs.length, totCr = hs.reduce((s,h) => s + nCr(h), 0);
+  const eHU = ev.filter(e => e.tipo==='hu_nueva'), eCr = ev.filter(e => e.tipo==='criterio_nuevo'), eUp = ev.filter(e => e.tipo==='criterio_actualizado');
+  const snap = (p.alcanceInicial && p.alcanceInicial.hu!=null) ? p.alcanceInicial : null;   // foto del alcance al crear el proyecto
+  const huNuevas = snap ? Math.max(0, totHU - Number(snap.hu)) : new Set(eHU.map(e => e.hu)).size;
+  const critDeNuevas = Math.min(eHU.reduce((s,e) => s + (Number(e.nCriterios)||0), 0), totCr);
+  const crAgregados = snap ? Math.max(0, totCr - Number(snap.criterios||0)) : Math.min(totCr, critDeNuevas + eCr.length);
+  const iniHU = snap ? Number(snap.hu) : Math.max(0, totHU - huNuevas);
+  const iniCr = snap ? Number(snap.criterios||0) : Math.max(0, totCr - crAgregados);
+  const huExcl = hs.filter(isHUExcluded).length;
+  const crExcl = hs.reduce((s,h) => s + (h.criterios||[]).filter(c => c.excluido || h.excluido).length, 0);
+  const vivas = hs.filter(h => !isHUExcluded(h));
+  const vigCr = vivas.reduce((s,h) => s + activeCrit(h).length, 0);
+  return { iniHU, iniCr, huNuevas, crDeNuevas:Math.min(critDeNuevas, crAgregados), crSueltos:Math.max(0, crAgregados - Math.min(critDeNuevas, crAgregados)), crAgregados,
+    actualizados:eUp.length, huExcl, crExcl, totHU, totCr, vigHU:vivas.length, vigCr,
+    recHU: vivas.filter(h => h.estado==='recibida').length, recCr: vivas.reduce((s,h) => s + activeCrit(h).filter(c => c.recibido).length, 0),
+    cambio: huNuevas>0 || crAgregados>0 || eUp.length>0 || huExcl>0 || crExcl>0 };
 }
 /* % entregado con el que se recibió el proyecto y % de certificación (bugs frente al desarrollo). */
 function entregaRecibida(p){ return p.entregaPct!=null ? p.entregaPct : projectProgress(p); }
@@ -1454,8 +1525,12 @@ const newDraft = () => ({ name:'', file:null, fileName:'', historias:[], analyzi
 let draft = newDraft();
 let qaEdit = null;   // edición del plazo de pruebas en el detalle del proyecto
 const openDetails = new Set();
+let critForm = null;   // formulario abierto bajo un criterio: {pid, hu, c, tipo:'alcance'|'no_aplica', texto, motivo}
+const cdraft = {};      // borradores del módulo de comentarios por HU: {hu: {crit, texto}}
 let bit = { analystId:null, date:ymd(new Date()), view:'dia', month:ymOf(new Date()), bugForm:null, saveState:'', newName:'' };
 let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinculo:'child' };
+/* Conexión en vivo con Azure DevOps (solo en la versión web con llave configurada en el servidor) */
+let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
 const local = { projects:new Map(), analistas:new Map(), bitacora:new Map(), config:new Map(), seguimiento:new Map(), amb_hojas:new Map(), amb_hist:new Map() };
@@ -1507,6 +1582,8 @@ function ingest(col, list){
     ambGenerales = list.find(d => d.tipo==='catalogo') || null;
   } else if(col==='amb_hist'){
     ambHist = list;
+  } else if(col==='azure_bugs'){
+    azBugs = new Map(list.map(d => [d.id, JSON.parse(JSON.stringify(d))]));
   }
 }
 function ingestLocal(col){ ingest(col, Array.from(local[col], ([id,d]) => Object.assign({id}, JSON.parse(JSON.stringify(d))))); }
@@ -2048,6 +2125,40 @@ function huStatusBadge(h, i, locked){
   else if(h.estado==='parcial'){ cls = 'badge-parcial'; txt = 'Parcial · ' + n + '/' + cr.length; }
   return `<button class="badge ${cls}" data-act="toggle-hu" data-hu="${i}" type="button" ${locked?'disabled':''} title="Marca o desmarca todos los criterios activos de esta HU"><span class="dot"></span>${txt}</button>`;
 }
+function critFormHtml(f){
+  const esc = escapeHtml;
+  if(f.tipo==='alcance') return `<div class="critform"><p class="small" style="margin:0 0 8px;">Edita el criterio con el cambio de alcance. Queda en estado <strong>Cambio de alcance</strong> (pendiente de volver a probar) y se registra en el seguimiento con el texto de antes y el de ahora.</p>
+    <label class="field-label">Nuevo texto del criterio</label><textarea rows="2" data-f="critform" data-k="texto">${esc(f.texto)}</textarea>
+    <label class="field-label" style="margin-top:8px;">Motivo del cambio (opcional)</label><textarea rows="1" data-f="critform" data-k="motivo">${esc(f.motivo)}</textarea>
+    <div class="flexend" style="gap:8px;margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="critform-cancel" type="button">Cancelar</button><button class="btn btn-sm btn-primary" data-act="critform-save" type="button">Guardar cambio de alcance</button></div></div>`;
+  return `<div class="critform"><p class="small" style="margin:0 0 8px;">Lo que no aplica deja de contar en el % del proyecto (el resto se reescala a 100%) y se registra en el seguimiento. Puedes reactivarlo después.</p>
+    <label class="field-label">Motivo (obligatorio)</label><textarea rows="2" data-f="critform" data-k="motivo">${esc(f.motivo)}</textarea>
+    <div class="flexend" style="gap:8px;margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="critform-cancel" type="button">Cancelar</button><button class="btn btn-sm btn-primary" data-act="critform-save" type="button">Marcar como no aplica</button></div></div>`;
+}
+/* Comentarios de una HU: son anotaciones del seguimiento (tipo "comentario"), así aparecen allí y en las novedades descargables. */
+function commentsHtml(h, i){
+  const p = currentProject(); if(!p) return '';
+  const esc = escapeHtml, key = 'com:' + i;
+  const list = segs.filter(e => e.projectId===p.id && e.tipo==='comentario' && e.hu===h.codigo).sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+  const d = cdraft[i] || {crit:'', texto:''};
+  const chip = e => {
+    const c = (e.crit!=null && h.criterios[e.crit]) ? h.criterios[e.crit] : null;
+    const st = c ? critState(c) : null;
+    const cls = st ? ({recibido:'badge-recibida', alcance:'badge-alcance', pendiente:'badge-pendiente'}[st] || 'badge-excl') : (h.estado==='recibida' && !isHUExcluded(h) ? 'badge-recibida' : (isHUExcluded(h) ? 'badge-excl' : 'badge-pendiente'));
+    return `<span class="badge ${cls}" title="Estado actual (en el seguimiento queda el estado que tenía al comentar)"><span class="dot"></span>Ahora: ${esc(st ? CRIT_STATE_LABEL[st] : huStateLabel(h))}</span>`;
+  };
+  const items = list.map(e => `<div class="comment"><div class="ct">${esc(e.texto||'')}</div>
+    <div class="cm"><span>${e.crit!=null ? 'Criterio ' + (e.crit+1) : 'Toda la HU'}</span>${chip(e)}<span>· ${esc(e.autor||'—')} · ${fmtDateTime(e.ts)}${e.postCert ? ' · <strong>después de certificar</strong>' : ''}${e.editadoEn ? ' · editado' : ''}</span></div></div>`).join('');
+  const opts = `<option value="">Toda la HU</option>` + (h.criterios||[]).map((c,ci) => `<option value="${ci}" ${String(d.crit)===String(ci)?'selected':''}>${ci+1}. ${esc(c.texto.slice(0,60))}</option>`).join('');
+  return `<details class="crit" data-key="${key}" style="margin-top:6px;" ${(openDetails.has(key) || d.texto) ? 'open' : ''}>
+    <summary>Comentarios (${list.length})</summary>
+    ${items || '<div class="small" style="padding:6px 0;">Aún no hay comentarios en esta HU.</div>'}
+    <div class="cform"><select data-f="cdraft" data-hu="${i}" aria-label="Criterio al que se refiere el comentario">${opts}</select>
+      <textarea rows="2" data-f="cdraft" data-hu="${i}" placeholder="Escribe un comentario (se guarda aunque el criterio esté o no recibido)" aria-label="Comentario">${esc(d.texto)}</textarea>
+      <button class="btn btn-sm btn-primary" data-act="comment-add" data-hu="${i}" type="button">Guardar comentario</button></div>
+    <p class="small" style="margin:6px 0 0;">Los comentarios aparecen en el Seguimiento diario y en las novedades que se descargan (Excel e informe PDF). Para editar o borrar uno, usa su anotación en el seguimiento.</p>
+  </details>`;
+}
 function huCard(h, i, scope, locked, all){
   const editable = scope==='draft' || scope==='edit';
   const cr = h.criterios || [];
@@ -2079,9 +2190,14 @@ function huCard(h, i, scope, locked, all){
     if(c.excluido) return `<div class="critrow excl"><div class="n num">${ci+1}.</div><div class="t">${escapeHtml(c.texto)}${c.motivo ? `<div class="small" style="text-decoration:none">Motivo: ${escapeHtml(c.motivo)}</div>` : ''}</div>
       <div class="wcell"><span class="num">${fmtPct(c.pesoPct)} de la HU</span><span class="eff">sin efecto</span></div>
       <div class="st"><span class="badge badge-excl"><span class="dot"></span>${exclLabel(c.excluido)}</span> <button class="btn btn-sm btn-ghost" data-act="reactivate" data-hu="${i}" data-c="${ci}" type="button">Reactivar</button></div></div>`;
-    return `<div class="critrow"><div class="n num">${ci+1}.</div><div class="t">${escapeHtml(c.texto)}</div>
+    const stt = critState(c);
+    const opts = [['pendiente','Pendiente'], ['recibido','Recibido' + (c.recibido && c.recibidoEn ? ' · ' + fmtDate(c.recibidoEn) : '')], ['no_aplica','No aplica'], ['alcance','Cambio de alcance']];
+    const stSel = `<select class="cstate s-${stt}" data-f="cstate" data-hu="${i}" data-c="${ci}" aria-label="Estado del criterio ${ci+1}" ${locked?'disabled':''}>${opts.map(o => `<option value="${o[0]}" ${o[0]===stt?'selected':''}>${o[1]}</option>`).join('')}</select>`;
+    const ctag = c.cambio ? `<div class="ctag"><span>↻ Alcance modificado el ${fmtDate(c.cambio.en)} · antes: «${escapeHtml(c.cambio.antes)}»${c.cambio.motivo ? ' · ' + escapeHtml(c.cambio.motivo) : ''}</span>${stt==='alcance' && !locked ? `<button class="btn btn-sm btn-ghost" data-act="crit-scope-edit" data-hu="${i}" data-c="${ci}" type="button">✏️ Editar texto</button>` : ''}</div>` : '';
+    const cf = (critForm && critForm.pid===(currentProject()||{}).id && critForm.hu===i && critForm.c===ci) ? critFormHtml(critForm) : '';
+    return `<div class="critrow"><div class="n num">${ci+1}.</div><div class="t">${escapeHtml(c.texto)}${ctag}</div>
       <div class="wcell"><span class="num"><strong>${fmtPct(c.pesoPct)}</strong> de la HU</span>${eff}</div>
-      <div class="st"><button class="badge ${c.recibido?'badge-recibida':'badge-pendiente'}" data-act="toggle-crit" data-hu="${i}" data-c="${ci}" type="button" ${locked?'disabled':''}><span class="dot"></span>${c.recibido ? 'Recibido' + (c.recibidoEn ? ' · ' + fmtDate(c.recibidoEn) : '') : 'Pendiente'}</button></div></div>`;
+      <div class="st">${stSel}</div>${cf}</div>`;
   }).join('');
   const foot = editable ? `<div class="critfoot"><button class="btn btn-sm" data-act="add-crit" data-scope="${scope}" data-hu="${i}" type="button">+ Criterio</button>${cr.length>1 ? `<button class="btn btn-sm btn-ghost" data-act="equal-crit" data-scope="${scope}" data-hu="${i}" type="button">Repartir peso igual</button>` : ''}</div>` : '';
   const empty = !cr.length ? `<div class="small" style="padding:6px 0;">Esta HU no tiene criterios de aceptación${editable ? ' — agrégalos abajo.' : '; se marca recibida completa.'}</div>` : '';
@@ -2091,7 +2207,7 @@ function huCard(h, i, scope, locked, all){
     <details class="crit" data-key="${key}" ${(openDetails.has(key) || (editable && !cr.length))?'open':''}>
       <summary>Criterios de aceptación (${cr.length})${nExcl && !editable ? ` · ${nExcl} excluido(s)` : ''} ${editable ? csumHtml(scope, i, h) : ''}</summary>
       ${rows}${empty}${foot}
-    </details></div>`;
+    </details>${scope==='view' ? commentsHtml(h, i) : ''}</div>`;
 }
 function weightBanner(list){
   const v = validateWeights(list);
@@ -2117,6 +2233,7 @@ function viewProjectDetail(){
     <div class="progress ${done?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
   body += qaClockPanel(p);
+  body += azurePanel(p);
   body += `<div class="panel"><div class="panel-head"><div><h2>Historias de usuario</h2>
     <p class="hint">${editing ? 'Ajusta el peso de cada HU y el de cada criterio dentro de su HU. Cada nivel debe sumar 100%.' : 'Abre “Criterios de aceptación” en cada HU y marca los criterios a medida que llegan a QA; el % del proyecto sube según su peso.'}</p></div>
     <div class="flexrow">${editing
@@ -2132,6 +2249,64 @@ function viewProjectDetail(){
   return body;
 }
 
+/* ================= Azure DevOps (bugs en vivo, solo lectura) ================= */
+function azDoc(p){ return p && p.azureCfg ? (azBugs.get(p.id) || null) : null; }
+function azNew(p){ const c = p.azureCfg || {}; return { pid:p.id, proyecto:c.proyecto||'', area:c.area||'', iteracion:c.iteracion||'', tag:c.tag||'', padre:c.padre||'', preview:null, error:'', busy:false }; }
+function azCfgFrom(f){ return { proyecto:(f.proyecto||'').trim(), area:(f.area||'').trim(), iteracion:(f.iteracion||'').trim(), tag:(f.tag||'').trim(), padre:String(f.padre||'').replace(/^#/,'').trim() }; }
+function azCfgProblem(c){
+  if(!c.area && !c.iteracion && !c.tag && !c.padre) return 'Indica al menos un dato para identificar los bugs: área, iteración, etiqueta o padre.';
+  if(c.padre && !/^\d{1,9}$/.test(c.padre)) return 'El ID del padre debe ser un número (por ejemplo 12345).';
+  return '';
+}
+function azCfgLine(c){
+  const x = (l,v) => v ? `<span class="az-chip">${l}: <b>${escapeHtml(v)}</b></span>` : '';
+  return x('Proyecto Azure', c.proyecto || (azInfo && azInfo.project) || '') + x('Área', c.area) + x('Iteración', c.iteracion) + x('Etiqueta', c.tag) + x('Padre', c.padre ? '#' + c.padre : '');
+}
+function azAgo(iso){
+  const d = toDate(iso); if(!d) return '';
+  const m = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+  return m < 1 ? 'hace un momento' : m < 60 ? 'hace ' + m + ' min' : m < 1440 ? 'hace ' + Math.round(m/60) + ' h' : 'hace ' + Math.round(m/1440) + ' d';
+}
+function azSummary(doc){
+  const bugs = doc.bugs || [], now = new Date();
+  const open = bugs.filter(b => !isClosedState(b.e)), sev = {critica:0, alta:0, media:0, baja:0};
+  open.forEach(b => { const s = evalBug(b, ansCfg, now).sev; if(sev[s]!=null) sev[s]++; });
+  const t = (l,v) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+  return `<div class="daytiles">${t('Bugs vinculados', bugs.length)}${t('Abiertos', open.length)}${t('Cerrados / resueltos', bugs.length - open.length)}${t('Abiertos críticos / altos', sev.critica + ' / ' + sev.alta)}${t('Abiertos medios / bajos', sev.media + ' / ' + sev.baja)}</div>`;
+}
+function azBugTable(doc){
+  const now = new Date(), base = doc.webBase || '';
+  const rows = (doc.bugs || []).map(b => { const ev = evalBug(b, ansCfg, now);
+    return `<tr><td class="mono" data-label="Bug">${base ? `<a class="az-link" href="${escapeHtml(base + b.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.id)}</a>` : escapeHtml(b.id)}</td><td data-label="Título" style="min-width:180px">${escapeHtml(b.t)}</td><td data-label="Severidad">${SEV_LABEL[ev.sev]}</td><td data-label="Estado">${escapeHtml(b.e)}</td><td data-label="Creado">${b.c ? fmtDate(b.c) : '—'}</td><td data-label="Padre (HU)" style="min-width:120px">${escapeHtml(String(b.p||'').slice(0,60))}</td></tr>`; }).join('');
+  return `<div class="scroll-y"><table class="stack"><thead><tr><th>Bug</th><th>Título</th><th>Severidad</th><th>Estado</th><th>Creado</th><th>Padre (HU)</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function azurePanel(p){
+  if(!azNS || isClosed(p)) return '';
+  const busy = azBusy.has(p.id), doc = azDoc(p), msg = azMsg[p.id] || '';
+  const f = azForm && azForm.pid===p.id ? azForm : (p.azureCfg ? null : azNew(p));
+  const head = (hint) => `<div class="panel-head"><div><h2>Azure DevOps · Bugs</h2><p class="hint">${hint}</p></div></div>`;
+  if(f){
+    const fld = (k, label, ph) => `<div><label class="field-label">${label}</label><input type="text" data-f="azl" data-k="${k}" value="${escapeHtml(f[k])}" placeholder="${escapeHtml(ph)}" autocomplete="off" /></div>`;
+    const pv = f.preview ? `<div class="banner ${f.preview.total ? 'banner-info' : 'banner-warn'}" style="margin-top:12px;"><span>${f.preview.total ? '✅' : '⚠️'}</span><span><strong>${f.preview.total} bug(s)</strong> encontrados en «${escapeHtml(f.preview.proyecto)}»${f.preview.truncated ? ' (se traerán los primeros 1500)' : ''}.${f.preview.sample.length ? ' Ejemplos: ' + f.preview.sample.map(b => `<span class="mono">${escapeHtml(b.id)}</span> ${escapeHtml(b.t)}`).join(' · ') : ' Revisa los datos: ninguna combinación coincidió.'}</span></div>` : '';
+    return `<div class="panel">${head('Vincula este proyecto con sus bugs en Azure DevOps. Combina los datos que tengas: se traen los bugs que cumplan <strong>todos</strong> los que llenes. Solo lectura: Azure no se modifica.')}
+      <div class="rowgrid">${fld('proyecto','Proyecto de Azure (opcional)', (azInfo && azInfo.project) || 'Nombre del proyecto en Azure')}${fld('area','Área / ruta','Ej.: Crédito\\Web')}${fld('iteracion','Iteración (sprint)','Ej.: Sprint 5')}${fld('tag','Etiqueta (tag)','Ej.: cert-credito')}${fld('padre','ID del padre (Epic, Feature o HU)','Ej.: 12345')}</div>
+      ${f.error ? `<div class="banner banner-warn" style="margin-top:12px;"><span>⚠️</span><span>${escapeHtml(f.error)}</span></div>` : ''}${pv}
+      <div class="flexend"><button class="btn btn-ghost" data-act="az-test" type="button" ${f.busy?'disabled':''}>${f.busy==='test' ? 'Consultando…' : 'Probar consulta'}</button>${p.azureCfg ? '<button class="btn btn-ghost" data-act="az-cancel" type="button">Cancelar</button>' : ''}<button class="btn btn-primary" data-act="az-save" type="button" ${f.busy?'disabled':''}>${f.busy==='save' ? 'Guardando…' : 'Guardar vínculo y traer bugs'}</button></div></div>`;
+  }
+  const err = doc && doc.error ? `<div class="banner banner-warn" style="margin-bottom:12px;"><span>⚠️</span><span>No se pudo actualizar${doc.errorAt ? ' (' + fmtDateTime(doc.errorAt) + ')' : ''}: ${escapeHtml(doc.error)}${doc.syncedAt ? ' Se muestran los datos de la última sincronización buena.' : ''}</span></div>` : '';
+  const err2 = msg ? `<div class="banner banner-warn" style="margin-bottom:12px;"><span>⚠️</span><span>${escapeHtml(msg)}</span></div>` : '';
+  const when = doc && doc.syncedAt ? `Última sincronización: <strong>${fmtDateTime(doc.syncedAt)}</strong> (${azAgo(doc.syncedAt)})${azInfo && azInfo.syncMinutes ? ' · se actualiza sola cada ' + azInfo.syncMinutes + ' min' : ''}` : (busy ? 'Consultando Azure DevOps…' : 'Aún no se ha sincronizado.');
+  return `<div class="panel">${head('Bugs de este proyecto traídos en vivo desde Azure DevOps (solo lectura).')}
+    <div style="margin-bottom:8px;">${azCfgLine(p.azureCfg)}</div>
+    <p class="small" style="margin:0 0 12px;">${when}</p>${err}${err2}
+    ${doc && doc.syncedAt ? azSummary(doc) + (doc.truncated ? '<p class="small">Hay más de 1500 bugs con este vínculo: se muestran los primeros 1500. Acota con iteración o etiqueta.</p>' : '') : ''}
+    ${doc && (doc.bugs||[]).length ? `<details class="crit" data-key="azbugs" ${openDetails.has('azbugs')?'open':''}><summary>Bugs de Azure (${doc.bugs.length})</summary>${azBugTable(doc)}</details>` : ''}
+    <div class="flexend"><button class="btn btn-sm" data-act="az-sync" type="button" ${busy?'disabled':''}>${busy ? 'Sincronizando…' : '↻ Sincronizar ahora'}</button><button class="btn btn-sm btn-ghost" data-act="az-edit" type="button">Editar vínculo</button><button class="btn btn-sm btn-ghost" data-act="az-unlink" type="button">Quitar vínculo</button></div></div>`;
+}
+function azCertBox(p){
+  const doc = azDoc(p); if(!azNS || !doc || !(doc.bugs||[]).length) return '';
+  return `<div class="banner banner-info" style="margin-bottom:12px;"><span>🔗</span><span>Azure DevOps tiene <strong>${doc.bugs.length} bug(s)</strong> vinculados a este proyecto (sincronizado ${azAgo(doc.syncedAt)}). <button class="btn btn-sm btn-primary" data-act="cert-use-azure" type="button" style="margin-left:6px;">Usar bugs de Azure (${doc.bugs.length})</button></span></div>`;
+}
 function fileSlot(kind, fileName){
   const input = `<input type="file" id="${kind==='bug' ? 'bugFileInput' : 'fileInput'}" hidden />`;
   if(!fileName) return `<div class="dropzone" id="${kind==='bug' ? 'bugDropzone' : 'dropzone'}" data-drop="${kind}"><strong>Haz clic</strong> o arrastra cualquier archivo (Excel, PDF, Word, PowerPoint, texto, imagen…)</div>${input}`;
@@ -2176,6 +2351,7 @@ function certificationPanel(p){
   const s = summarizeBugs(certDraft.bugs, ansCfg, new Date());
   const unassigned = certDraft.bugs.filter(b => !b.h).length;
   return `<div class="panel"><div class="panel-head"><div><h2>Certificación</h2><p class="hint">Paso 1: trae los bugs del proyecto. Paso 2: revisa a qué HU pertenece cada uno. Paso 3: guarda la certificación.</p></div></div>
+    ${azCertBox(p)}
     <div class="rowgrid" style="margin-bottom:12px;">
       <div><label class="field-label">Export de bugs (Excel/CSV se lee directo; Word, PDF, imagen u otros con IA)</label>
         ${fileSlot('bug', certDraft.fileName)}</div>
@@ -2337,6 +2513,10 @@ function segFormHtml(p){
         <div style="margin-bottom:10px;">${lab('Issue creado por el ambiente (# o enlace)', inp('issue','text','Ej. 4875 o https://dev.azure.com/…'))}</div>`;
       motivoLabel = 'Qué pasó con el ambiente (opcional)';
       hint = 'Registra el bloqueo del día con su hora de inicio y fin. Si todavía sigue caído, déjalo sin hora fin y ciérralo después con “Editar”. No cambia el avance del proyecto.'; break;
+    case 'comentario':
+      dyn = `<div class="rowgrid">${lab('HU', segHuSelect(p, 'Elige la HU…'))}${lab('Criterio (o toda la HU)', segCritSelect(p, true))}</div>`;
+      motivoLabel = 'Comentario';
+      hint = 'El comentario queda guardado con el estado en que está el criterio (recibido o no) y aparece en el seguimiento y en las novedades que se descargan.'; break;
     case 'nota': motivoLabel = 'Nota'; break;
   }
   return `<div class="segform">
@@ -2364,6 +2544,7 @@ function segEditHtml(e){
     tl = 'Qué pasó con el ambiente';
   }
   else if(e.tipo==='nota'){ tl = 'Nota'; }
+  else if(e.tipo==='comentario'){ tl = 'Comentario'; }
   if(['hu_nueva','criterio_nuevo','criterio_actualizado','desistido','no_aplica','reactivado'].includes(e.tipo)) hint = 'Editar cambia solo la anotación (fecha y motivo). El cambio de alcance ya aplicado a las HU no se modifica; para corregirlo usa Reactivar o registra otro cambio.';
   if(e.tipo==='reanudado') hint = 'La fecha de reanudación es el primer día en que el proyecto vuelve a trabajarse; los días hábiles congelados se cuentan hasta el día anterior.';
   return `<div class="seg-entry editing seg-edit"><div class="sh"><strong style="font-size:13px;">Editar anotación · ${esc(t.label)}</strong></div>
@@ -2404,9 +2585,10 @@ function segEntryHtml(e, ro){
     }
     case 'reanudado': title = 'Proyecto reanudado'; break;
     case 'reactivado': title = 'Reactivado · ' + ref; body = e.critTexto ? esc(e.critTexto) : ''; break;
+    case 'comentario': title = 'Comentario · ' + (ref || 'sin HU'); body = (e.critTexto ? '<span class="small">' + esc(e.critTexto) + '</span>\n' : '') + esc(e.texto||''); break;
     default: title = 'Nota';
   }
-  const stat = e.tipo==='stopper' ? (e.estado==='resuelto' ? `<span class="badge ans-cumple"><span class="dot"></span>Resuelto${e.resueltoEn ? ' · ' + fmtDate(e.resueltoEn) : ''}</span>` : `<span class="badge ans-incumple"><span class="dot"></span>Abierto</span>`) : '';
+  const stat = e.tipo==='stopper' ? (e.estado==='resuelto' ? `<span class="badge ans-cumple"><span class="dot"></span>Resuelto${e.resueltoEn ? ' · ' + fmtDate(e.resueltoEn) : ''}</span>` : `<span class="badge ans-incumple"><span class="dot"></span>Abierto</span>`) : (e.tipo==='comentario' && e.estadoCrit ? `<span class="badge ${/recibid/.test(e.estadoCrit) ? 'badge-recibida' : /alcance/.test(e.estadoCrit) ? 'badge-alcance' : /pendiente/.test(e.estadoCrit) ? 'badge-pendiente' : 'badge-excl'}"><span class="dot"></span>${esc((e.crit!=null ? 'Criterio ' : 'HU ') + e.estadoCrit)}</span>` : '');
   const resolveBtn = (e.tipo==='stopper' && e.estado!=='resuelto') ? `<button class="btn btn-sm" data-act="seg-resolve" data-id="${esc(e.id)}" type="button">Marcar resuelto</button>` : '';
   const editBtn = `<button class="btn btn-sm btn-ghost" data-act="seg-edit" data-id="${esc(e.id)}" type="button" aria-label="Editar anotación">✏️ Editar</button>`;
   const del = segDel===e.id
@@ -2479,9 +2661,9 @@ function viewAzure(){
   return `
   <div class="panel">
     <div class="panel-head"><div><h2>Conexión con Azure DevOps</h2><p class="hint">Estado de la integración</p></div>
-      <span class="badge ans-sin_fecha"><span class="dot"></span>Conexión en vivo: no disponible</span></div>
-    <div class="banner banner-info" style="margin-bottom:12px;"><span>ℹ️</span><span>Hoy QA Certifica trabaja con la información de Azure <strong>por importación</strong>: generas el query aquí, lo exportas desde Azure Boards y lo cargas al certificar un proyecto; la herramienta relaciona cada bug con su HU y calcula los ANS. No hay conexión directa porque (1) el navegador bloquea las llamadas de esta página a Azure DevOps y (2) un token pegado aquí quedaría guardado en una base compartida con todo el equipo — por eso esta página nunca pide tokens.</span></div>
-    <p class="small" style="margin:0;"><strong>Para conectarlo en vivo</strong> se necesitaría integrar la API de Azure DevOps con una credencial guardada en el servidor. No está incluido en esta versión: hoy se trabaja importando los archivos exportados.</p>
+      <span class="badge ans-sin_fecha"><span class="dot"></span>${azNS ? 'Conexión en vivo: activa en cada proyecto' : 'Conexión en vivo: no disponible'}</span></div>
+    <div class="banner banner-info" style="margin-bottom:12px;"><span>ℹ️</span><span>Hoy QUQI_QA trabaja con la información de Azure <strong>por importación</strong>: generas el query aquí, lo exportas desde Azure Boards y lo cargas al certificar un proyecto; la herramienta relaciona cada bug con su HU y calcula los ANS. No hay conexión directa porque (1) el navegador bloquea las llamadas de esta página a Azure DevOps y (2) un token pegado aquí quedaría guardado en una base compartida con todo el equipo — por eso esta página nunca pide tokens.</span></div>
+    <p class="small" style="margin:0;">${azNS ? '<strong>Conexión en vivo activa:</strong> en cada proyecto abierto aparece el panel «Azure DevOps», donde vinculas por área, iteración, etiqueta o padre y los bugs se traen solos (solo lectura). Este generador sirve para armar la consulta a mano o importar un export.' : '<strong>Para conectarlo en vivo</strong> el administrador debe configurar AZURE_DEVOPS_ORG y AZURE_DEVOPS_PAT (llave de solo lectura) en el servidor. Mientras tanto se trabaja importando los archivos exportados.'}</p>
   </div>
 
   <div class="panel">
@@ -2673,7 +2855,7 @@ function buildReportPdf(JsPDF, p){
   const q = certQuality(p, entries), fz = freezeInfo(entries, ymd(new Date())), ab = ambBlockInfo(entries);
   const qaE = entries.filter(e => e.tipo==='certificado_qa').pop(), cq = (qaE && qaE.cq) || {};
   const idx = overallIndex(p.historias) || p.overallIndex;
-  const entrega = entregaRecibida(p);
+  const entrega = entregaRecibida(p), al = alcanceInfo(p, entries);
   const startYmd = ymd(new Date(p.createdAt || Date.now())), endYmd = ymd(new Date(closedAt(p) || Date.now()));
   const calDays = Math.max(0, diffDays(startYmd, endYmd)) + 1, bizDays = bizDaysBetween(startYmd, endYmd, true);
   const dShort = s => fmtYmd(s, {day:'numeric', month:'short', year:'numeric'});
@@ -2787,7 +2969,7 @@ function buildReportPdf(JsPDF, p){
 
   /* ================= portada y resumen ================= */
   setFill(PC.navy); doc.rect(0, 0, PW, 52, 'F'); setFill(PC.blue); doc.rect(0, 52, PW, 1.6, 'F');
-  font(9, 'bold'); setInk('#9fc2f5'); doc.text('BANCO FINANDINA  ·  QA CERTIFICA', M, 14);
+  font(9, 'bold'); setInk('#9fc2f5'); doc.text('BANCO FINANDINA  ·  QUQI_QA', M, 14);
   font(21, 'bold'); setInk(PC.white); doc.text('Informe de certificación QA', M, 26);
   font(13); const nm = wrap(p.name, CW); setInk('#dce9fb'); doc.text(nm.slice(0,2), M, 35, {lineHeightFactor:1.2});
   font(8.5); setInk('#9fc2f5');
@@ -2795,7 +2977,7 @@ function buildReportPdf(JsPDF, p){
   y = 62;
 
   const kw = (CW - 9) / 4; let kx = M;
-  kpi(kx, kw, 'Entrega recibida', fmtPct(entrega), PC.blue, 'Avance con el que llegó a QA'); kx += kw + 3;
+  kpi(kx, kw, 'Entrega recibida', fmtPct(entrega), PC.blue, al.recHU + ' de ' + al.vigHU + ' HU del alcance final'); kx += kw + 3;
   kpi(kx, kw, 'Certificación', q.pct==null ? '—' : fmtPct(q.pct), q.pct==null ? PC.mute : (q.pct >= 95 ? PC.good : q.pct >= 85 ? PC.warn : PC.bad), 'Bugs vs desarrollo'); kx += kw + 3;
   kpi(kx, kw, 'Índice de calidad', idx ? idx.label : '—', idx ? (PC_IDX[idx.label] || PC.blue) : PC.mute, 'Bugs y tiempo de respuesta'); kx += kw + 3;
   kpi(kx, kw, 'Cumplimiento ANS', p.ansPct!=null ? fmtPct(p.ansPct) : '—', p.ansPct==null ? PC.mute : (p.ansPct >= cfg.objetivoPct ? PC.good : PC.bad), 'Objetivo ' + fmtPct(cfg.objetivoPct));
@@ -2805,13 +2987,31 @@ function buildReportPdf(JsPDF, p){
   let resumen = 'El proyecto "' + p.name + '" ingresó a QA el ' + dLong(startYmd) + ' y se cerró el ' + dLong(endYmd) + ', tras ' + plural(bizDays, 'día hábil', 'días hábiles') + ' de ejecución (' + plural(calDays, 'día', 'días') + ' calendario)';
   if(fz.periods) resumen += ', de los cuales ' + plural(fz.days, 'día hábil estuvo', 'días hábiles estuvo') + ' congelado por prioridad de otros proyectos';
   { const tc = testClock(p, entries, ymd(new Date())); if(tc.plan!=null) resumen += '. Se habían planeado ' + plural(tc.plan, 'día hábil', 'días hábiles') + ' de pruebas y se usaron ' + tc.used + (tc.over ? ' (' + plural(tc.over, 'día', 'días') + ' por encima del plan)' : (tc.remaining>0 ? ' (' + plural(tc.remaining, 'día', 'días') + ' antes de lo planeado)' : ' (dentro del plan)')); }
-  resumen += '. Se recibió con una entrega del ' + fmtPct(entrega) + ' sobre ' + plural((p.historias||[]).length, 'historia de usuario', 'historias de usuario') + '.';
+  resumen += '. El requerimiento original del dueño del proyecto era de ' + plural(al.iniHU, 'historia de usuario', 'historias de usuario') + (al.huNuevas || al.crAgregados || al.huExcl || al.crExcl ? '; con los cambios de alcance y ajustes el proyecto se certificó sobre ' + plural(al.vigHU, 'historia de usuario', 'historias de usuario') + ' y ' + plural(al.vigCr, 'criterio', 'criterios') + '' : ' y el alcance no cambió durante la ejecución') + '. Se recibió con una entrega del ' + fmtPct(entrega) + ' del alcance final.';
   if(q.pct != null) resumen += ' Con ' + plural(q.bugs, 'bug', 'bugs') + ' sobre ' + q.base + ' ' + q.basis + ', el desarrollo obtuvo una calificación de certificación del ' + fmtPct(q.pct) + (idx ? ' y un índice de calidad ' + idx.label : '') + '.';
   paragraph(resumen);
   const brief = novedadesBrief(entries); if(brief.length){ y += 1; bullets(brief); }
 
   /* ================= calificación al desarrollo ================= */
-  section('Calificación al desarrollo', 'Qué tanto se entregó, cuántos bugs hubo y cómo se calificó cada historia de usuario.');
+  section('Calificación al desarrollo', 'Requerimiento entregado frente a lo probado y certificado, bugs encontrados y calificación de cada historia de usuario.', 120);
+  {
+    const dis = cqNum(cq.casosDis), okc = cqNum(cq.casosOk), cpct = dis > 0 ? clamp(100 * okc / dis, 0, 100) : null;
+    font(9, 'bold'); setInk(PC.ink); doc.text('Requerimiento entregado vs probado y certificado', M, y + 3); y += 6;
+    ensure(32); const k3 = (CW - 6) / 3; let kx3 = M;
+    kpi(kx3, k3, 'Entregado a QA', fmtPct(entrega), PC.blue, al.recCr + ' de ' + al.vigCr + ' criterios · ' + al.recHU + ' de ' + al.vigHU + ' HU'); kx3 += k3 + 3;
+    kpi(kx3, k3, 'Probado', dis > 0 ? String(dis) : '-', PC.violet, dis > 0 ? 'casos de prueba diseñados' : 'sin Certificado QA registrado'); kx3 += k3 + 3;
+    kpi(kx3, k3, 'Certificado', cpct == null ? '-' : fmtPct(cpct), cpct == null ? PC.mute : (cpct >= 95 ? PC.good : cpct >= 85 ? PC.warn : PC.bad), cpct == null ? 'sin casos registrados' : okc + ' de ' + dis + ' casos ejecutados con éxito');
+    y += 31;
+    font(9, 'bold'); setInk(PC.ink); doc.text('Del requerimiento original al alcance final', M, y + 3); y += 5;
+    const srows = [[{t:'Requerimiento original (lo que definió el dueño del proyecto)', bold:true}, {t:String(al.iniHU), bold:true}, {t:String(al.iniCr), bold:true}]];
+    if(al.huNuevas) srows.push(['+ HU nuevas por cambio de alcance', '+' + al.huNuevas, al.crDeNuevas ? '+' + al.crDeNuevas : '-']);
+    if(al.crSueltos) srows.push(['+ Criterios nuevos en HU existentes', '-', '+' + al.crSueltos]);
+    if(al.actualizados) srows.push(['Criterios actualizados (cambia el texto, no la cantidad)', '-', String(al.actualizados)]);
+    if(al.huExcl || al.crExcl) srows.push(['- No aplica / desistido (dejan de contar)', al.huExcl ? '-' + al.huExcl : '-', al.crExcl ? '-' + al.crExcl : '-']);
+    srows.push([{t:'Alcance final certificado', bold:true}, {t:String(al.vigHU), bold:true}, {t:String(al.vigCr), bold:true}]);
+    table([{h:'Concepto', w:120}, {h:'HU', w:28, align:'right'}, {h:'Criterios', w:30, align:'right'}], srows, {fs:8.4});
+    paragraph(al.cambio ? 'El dueño del proyecto definió ' + plural(al.iniHU, 'HU', 'HU') + ' al inicio; con los cambios de alcance y ajustes el proyecto terminó con ' + plural(al.vigHU, 'HU', 'HU') + ' y ' + plural(al.vigCr, 'criterio de aceptación', 'criterios de aceptación') + '. El % entregado, lo probado y lo certificado se miden sobre ese alcance final.' : 'El alcance no cambió durante la ejecución: lo entregado, probado y certificado se mide sobre el requerimiento original.', {size:8.5, color:PC.mute});
+  }
   if(q.pct != null){
     ensure(30); setFill(PC.bg); setDraw(PC.line); doc.setLineWidth(0.3); doc.roundedRect(M, y, CW, 26, 2.5, 2.5, 'FD');
     font(8, 'bold'); setInk(PC.mute); doc.text('CÓMO SE CALCULA LA CERTIFICACIÓN'.replace('Ó', 'Ó'), M + 5, y + 6);
@@ -2866,8 +3066,8 @@ function buildReportPdf(JsPDF, p){
   const trows = [[{t:dShort(startYmd), bold:true}, {t:'Inicio', pill:PC.blue}, 'El proyecto ingresó a QA con ' + plural((p.historias||[]).length, 'historia de usuario', 'historias de usuario') + '.']]
     .concat(entries.map(e => {
       const r = novedadRow(e, fz), t = segTipo(e.tipo);
-      const col = {stopper:PC.bad, hu_nueva:PC.blue, criterio_nuevo:PC.blue, criterio_actualizado:PC.blue, desistido:PC.mute, no_aplica:PC.mute, reactivado:PC.blue, congelado:PC.warn, reanudado:PC.good, amb_bloqueado:PC.violet, certificado_qa:PC.good, nota:PC.mute}[e.tipo] || PC.mute;
-      const lab = {stopper:'Stopper', hu_nueva:'HU nueva', criterio_nuevo:'Criterio +', criterio_actualizado:'Criterio ~', desistido:'Desistido', no_aplica:'No aplica', reactivado:'Reactivado', congelado:'Congelado', reanudado:'Reanudado', amb_bloqueado:'Ambiente', certificado_qa:'Cert. QA', nota:'Nota'}[e.tipo] || t.label;
+      const col = {stopper:PC.bad, hu_nueva:PC.blue, criterio_nuevo:PC.blue, criterio_actualizado:PC.blue, desistido:PC.mute, no_aplica:PC.mute, reactivado:PC.blue, congelado:PC.warn, reanudado:PC.good, amb_bloqueado:PC.violet, certificado_qa:PC.good, nota:PC.mute, comentario:'#0f9fb5'}[e.tipo] || PC.mute;
+      const lab = {stopper:'Stopper', hu_nueva:'HU nueva', criterio_nuevo:'Criterio +', criterio_actualizado:'Criterio ~', desistido:'Desistido', no_aplica:'No aplica', reactivado:'Reactivado', congelado:'Congelado', reanudado:'Reanudado', amb_bloqueado:'Ambiente', certificado_qa:'Cert. QA', nota:'Nota', comentario:'Comentario'}[e.tipo] || t.label;
       const det = [r[2], r[3] ? '(' + r[3] + ')' : '', r[5] ? 'Horario ' + r[5] : '', (r[6] && e.tipo!=='stopper') ? 'Issue ' + r[6] : '', r[4], r[7] ? '[' + r[7] + ']' : ''].filter(Boolean).join(' - ');
       return [{t:dShort(e.fecha), bold:true}, {t:lab, pill:col}, det];
     }));
@@ -2880,7 +3080,7 @@ function buildReportPdf(JsPDF, p){
     doc.setPage(i);
     if(i > 1){ setFill(PC.navy); doc.rect(0, 0, PW, 9, 'F'); font(8, 'bold'); setInk(PC.white); doc.text(pdfT(p.name).slice(0, 70), M, 6); font(8); setInk('#9fc2f5'); doc.text('Informe de certificación QA', PW - M, 6, {align:'right'}); }
     setDraw(PC.line); doc.setLineWidth(0.2); doc.line(M, PH - 12, PW - M, PH - 12);
-    font(7.5); setInk(PC.mute); doc.text(pdfT('QA Certifica · Banco Finandina · Generado el ' + gen), M, PH - 7.5); doc.text('Página ' + i + ' de ' + n, PW - M, PH - 7.5, {align:'right'});
+    font(7.5); setInk(PC.mute); doc.text(pdfT('QUQI_QA · Banco Finandina · Generado el ' + gen), M, PH - 7.5); doc.text('Página ' + i + ' de ' + n, PW - M, PH - 7.5, {align:'right'});
   }
   return doc.output('arraybuffer');
 }
@@ -3288,7 +3488,7 @@ function fitDoc(p){
 async function createProject(){
   const st = createState(); if(!st.can) return;
   const est = draftEstimate(), dp = draftDiasValue();
-  const data = cloneJ({ name:draft.name.trim(), createdAt:new Date().toISOString(), createdBy:whoName(), status:'activo', historias:draft.historias,
+  const data = cloneJ({ name:draft.name.trim(), createdAt:new Date().toISOString(), createdBy:whoName(), status:'activo', historias:draft.historias, alcanceInicial:{hu:draft.historias.length, criterios:draft.historias.reduce((s,h) => s + (h.criterios||[]).length, 0)},
     estDias: est.dias || null, estFuente: est.fuente, estRazon: est.ai ? est.ai.razon : '', diasPlan: dp>0 ? Math.round(dp) : null, testStart: ymd(new Date()) });
   let id = null;
   await guarded(async () => { id = await stAdd('projects', data); });
@@ -3297,6 +3497,50 @@ async function createProject(){
   draft = newDraft();
   currentView = 'proyectos'; selectedProjectId = id; mode = null;
   render(); toast('Proyecto creado');
+}
+
+/* ---- Azure DevOps (solo lectura; el servidor guarda la llave y sincroniza) ---- */
+function azErrText(e){ return (e && e.message) || (e && e.code==='network' ? 'No se pudo conectar con el servidor.' : 'No se pudo consultar Azure DevOps.'); }
+async function azSync(p, force){
+  if(!azNS || !p || !p.azureCfg || azBusy.has(p.id)) return;
+  azBusy.add(p.id); delete azMsg[p.id]; softRender();
+  try{ const r = await azNS.sync(p.id, !!force); if(force) toast(r && r.skipped ? 'Los bugs ya estaban al día' : 'Bugs actualizados' + (r && r.total!=null ? ' (' + r.total + ')' : '')); }
+  catch(e){ azMsg[p.id] = azErrText(e); }
+  finally{ azBusy.delete(p.id); softRender(); }
+}
+function azMaybeSync(p){
+  if(!azNS || !p || !p.azureCfg || isClosed(p)) return;
+  const d = azBugs.get(p.id), t = d && d.syncedAt ? new Date(d.syncedAt).getTime() : 0;
+  if(!d || !t || d.error || Date.now() - t > 300000) azSync(p, false);
+}
+async function azTest(){
+  const p = currentProject(); if(!p) return;
+  if(!azForm || azForm.pid!==p.id) azForm = azNew(p);
+  const c = azCfgFrom(azForm), pr = azCfgProblem(c);
+  if(pr){ azForm.error = pr; azForm.preview = null; render(); return; }
+  azForm.busy = 'test'; azForm.error = ''; azForm.preview = null; render();
+  try{ const r = await azNS.test(c); if(azForm && azForm.pid===p.id) azForm.preview = r; }
+  catch(e){ if(azForm && azForm.pid===p.id) azForm.error = azErrText(e); }
+  if(azForm) azForm.busy = false; render();
+}
+async function azSave(){
+  const p = currentProject(); if(!p) return;
+  if(!azForm || azForm.pid!==p.id) azForm = azNew(p);
+  const c = azCfgFrom(azForm), pr = azCfgProblem(c);
+  if(pr){ azForm.error = pr; render(); return; }
+  azForm.busy = 'save'; azForm.error = ''; render();
+  await patchProject(np => { np.azureCfg = c; });
+  azForm = null; render();
+  const np = projects.find(x => x.id===p.id); if(np) await azSync(np, true);
+}
+function certUseAzure(){
+  const p = currentProject(), doc = azDoc(p); if(!p || !certDraft || !doc || !(doc.bugs||[]).length) return;
+  const bugs = cloneJ(doc.bugs).map(b => Object.assign({}, b, {h:null}));
+  matchBugsToHU(bugs, certDraft.historias);
+  certDraft.bugs = bugs; certDraft.file = null; certDraft.fileName = ''; certDraft.pasted = ''; recomputeCert();
+  const sin = bugs.filter(b => !b.h).length;
+  certDraft.status = bugs.length + ' bugs traídos de Azure DevOps (sincronizado ' + fmtDateTime(doc.syncedAt) + ')' + (sin ? ' · ' + sin + ' sin HU' : '') + (doc.truncated ? ' · hay más de 1500: se tomaron los primeros 1500' : '');
+  openDetails.add('certbugs'); render();
 }
 
 /* ---- certificación ---- */
@@ -3469,6 +3713,11 @@ async function addSeguimiento(){
       entry.hu = h.codigo; entry.crit = ci; entry.critTexto = ci!=null ? h.criterios[ci].texto : '';
       excludeTarget(h, ci, tipo, texto, now); changed = true; break;
     }
+    case 'comentario': {
+      if(!h){ toast('Elige la HU.'); return; }
+      if(!texto){ toast('Escribe el comentario.'); return; }
+      entry.hu = h.codigo; entry.crit = ci; entry.critTexto = ci!=null ? h.criterios[ci].texto : ''; entry.estadoCrit = estadoCritOf(h, ci); break;
+    }
     case 'nota': if(!texto){ toast('Escribe la nota.'); return; } break;
     case 'certificado_qa': {
       const dis = Number(f.casosDis), okc = Number(f.casosOk);
@@ -3571,6 +3820,7 @@ async function saveEdit(){
   data.fecha = f.fecha;
   if(e.tipo==='stopper') data.bugId = (f.bugId||'').trim().replace(/^#/, '');
   if(e.tipo!=='reanudado') data.texto = (f.texto||'').trim();
+  if(e.tipo==='comentario' && !data.texto){ toast('El comentario no puede quedar vacío.'); return; }
   if(e.tipo==='certificado_qa'){
     const dis = Number(f.casosDis), okc = Number(f.casosOk);
     if(!(dis>0) || !Number.isInteger(dis)){ toast('Indica cuántos casos de prueba se diseñaron.'); return; }
@@ -3623,6 +3873,65 @@ async function deleteEntry(id){
   if(ok){ segs = segs.filter(e => e.id!==id); segDel = null; render(); }
 }
 
+/* ---- estado de cada criterio: pendiente / recibido / no aplica / cambio de alcance ---- */
+function estadoCritOf(h, ci){
+  if(ci!=null && h.criterios[ci]) return {pendiente:'pendiente', recibido:'recibido', alcance:'con cambio de alcance', no_aplica:'no aplica', desistido:'desistido'}[critState(h.criterios[ci])];
+  return huStateLabel(h).toLowerCase();
+}
+function startCritChange(hi, ci, estado, force){
+  const p = currentProject(); if(!p) return;
+  const h = p.historias[hi], c = h && h.criterios[ci]; if(!c) return;
+  if(p.status==='certificado'){ render(); return; }
+  if(!force && estado===critState(c)){ render(); return; }
+  if(estado==='pendiente' || estado==='recibido'){
+    critForm = null;
+    patchProject(np => { setCritState(np.historias[hi], ci, estado, new Date().toISOString()); });
+    return;
+  }
+  critForm = { pid:p.id, hu:hi, c:ci, tipo:estado, texto:c.texto, motivo:(estado==='alcance' && c.cambio) ? (c.cambio.motivo||'') : '' };
+  openDetails.add('view:' + hi); render();
+  const ta = $('[data-f="critform"]'); if(ta){ ta.focus(); try{ ta.setSelectionRange(ta.value.length, ta.value.length); }catch(_){} }
+}
+async function saveCritForm(){
+  const f = critForm, p = currentProject(); if(!f || !p || f.pid!==p.id) return;
+  const np = cloneJ(p), h = np.historias[f.hu], c = h && h.criterios[f.c];
+  if(!c){ critForm = null; render(); return; }
+  const now = new Date().toISOString(), motivo = (f.motivo||'').trim();
+  const entry = { projectId:p.id, fecha:ymd(new Date()), ts:now, autor:whoName(), postCert:isClosed(p), hu:h.codigo, crit:f.c };
+  if(f.tipo==='no_aplica'){
+    if(c.excluido){ critForm = null; render(); return; }
+    if(!motivo){ toast('Indica el motivo.'); return; }
+    Object.assign(entry, {tipo:'no_aplica', texto:motivo, critTexto:c.texto});
+    excludeTarget(h, f.c, 'no_aplica', motivo, now);
+  } else {
+    const nt = (f.texto||'').trim();
+    if(!nt){ toast('Escribe el nuevo texto del criterio.'); return; }
+    if(nt===c.texto){ toast('El texto es igual al actual: edítalo para registrar el cambio de alcance.'); return; }
+    Object.assign(entry, {tipo:'criterio_actualizado', texto:motivo, antes:c.texto, despues:nt});
+    changeCritScope(h, f.c, nt, motivo, now);
+  }
+  let saved = false;
+  await guarded(async () => { await saveProject(np); saved = true; });
+  if(!saved) return;
+  const tipo = f.tipo;
+  critForm = null;
+  await pushEntry(entry); render();
+  toast(tipo==='no_aplica' ? 'Criterio marcado como no aplica' : 'Cambio de alcance registrado: el criterio quedó pendiente de prueba');
+}
+async function addComment(hi){
+  const p = currentProject(); if(!p) return;
+  const h = p.historias[hi]; if(!h) return;
+  const d = cdraft[hi] || {crit:'', texto:''}, texto = (d.texto||'').trim();
+  if(!texto){ toast('Escribe el comentario.'); return; }
+  const ci = d.crit==='' ? null : Number(d.crit);
+  if(ci!=null && !h.criterios[ci]){ toast('Ese criterio ya no existe.'); return; }
+  const entry = { projectId:p.id, fecha:ymd(new Date()), ts:new Date().toISOString(), tipo:'comentario', autor:whoName(), postCert:isClosed(p), texto,
+    hu:h.codigo, crit:ci, critTexto: ci!=null ? h.criterios[ci].texto : '', estadoCrit:estadoCritOf(h, ci) };
+  const id = await pushEntry(entry); if(!id) return;
+  delete cdraft[hi]; openDetails.add('com:' + hi);
+  render(); toast('Comentario guardado: ya aparece en el seguimiento');
+}
+
 /* ================= eventos (delegación) ================= */
 function onClick(e){
   const t = e.target;
@@ -3640,16 +3949,23 @@ function onClick(e){
   const now = new Date().toISOString();
   switch(act){
     case 'tab':
-      currentView = el.dataset.tab; qaEdit = null; selectedProjectId = null; fullSegId = null; fullSegFilter = ''; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null;
+      currentView = el.dataset.tab; critForm = null; qaEdit = null; selectedProjectId = null; fullSegId = null; fullSegFilter = ''; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null;
       if(currentView==='azure') ansDraft = null;
       render(); break;
-    case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; seg = newSegForm(); render(); break;
+    case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; azForm = null; seg = newSegForm(); render(); azMaybeSync(projects.find(x => x.id===el.dataset.id)); break;
+    case 'az-sync': { const ap = currentProject(); if(ap) azSync(ap, true); break; }
+    case 'az-edit': { const ap = currentProject(); if(ap){ azForm = azNew(ap); render(); } break; }
+    case 'az-cancel': azForm = null; render(); break;
+    case 'az-test': azTest(); break;
+    case 'az-save': azSave(); break;
+    case 'az-unlink': patchProject(np => { delete np.azureCfg; }).then(() => { azForm = null; delete azMsg[currentProject() ? currentProject().id : '']; render(); toast('Vínculo con Azure quitado'); }); break;
+    case 'cert-use-azure': certUseAzure(); break;
     case 'seg-full': currentView = 'cerrados'; selectedProjectId = null; fullSegId = el.dataset.id; fullSegFilter = ''; mode = null; work = null; certDraft = null; render(); window.scrollTo(0,0); break;
     case 'seg-full-close': fullSegId = null; render(); break;
     case 'seg-filter': fullSegFilter = el.dataset.k || ''; render(); break;
     case 'seg-download': exportNovedades(el.dataset.id); break;
     case 'report-pdf': exportReport(el.dataset.id); break;
-    case 'back': qaEdit = null; fullSegId = null; selectedProjectId = null; mode = null; work = null; certDraft = null; render(); break;
+    case 'back': critForm = null; qaEdit = null; fullSegId = null; selectedProjectId = null; mode = null; work = null; certDraft = null; render(); break;
     case 'edit-start': { const p = currentProject(); if(!p) break; work = cloneJ(p.historias); mode = 'edit'; render(); break; }
     case 'edit-cancel': mode = null; work = null; render(); break;
     case 'edit-save': {
@@ -3691,6 +4007,10 @@ function onClick(e){
     case 'seg-del-cancel': segDel = null; render(); break;
     case 'seg-del-yes': deleteEntry(el.dataset.id); break;
     case 'reactivate': reactivate(hi, ci); break;
+    case 'comment-add': addComment(hi); break;
+    case 'critform-save': saveCritForm(); break;
+    case 'critform-cancel': critForm = null; render(); break;
+    case 'crit-scope-edit': startCritChange(hi, ci, 'alcance', true); break;
     case 'analyze': analyzeRequirement(); break;
     case 'pick-file': { const i = $(el.dataset.kind==='bug' ? '#bugFileInput' : '#fileInput'); if(i) i.click(); break; }
     case 'remove-file':
@@ -3753,11 +4073,14 @@ function onInput(e){
     case 'qaDias': if(qaEdit) qaEdit.dias = el.value; break;
     case 'qaInicio': if(qaEdit) qaEdit.inicio = el.value; break;
     case 'certPaste': if(certDraft) certDraft.pasted = el.value; break;
+    case 'critform': if(critForm) critForm[el.dataset.k] = el.value; break;
+    case 'cdraft': (cdraft[hi] = cdraft[hi] || {crit:'', texto:''}).texto = el.value; break;
     case 'seg': seg[el.dataset.k] = el.value; cqTotalRefresh('seg', seg); break;
     case 'segEdit': if(segEdit){ segEdit[el.dataset.k] = el.value; cqTotalRefresh('segEdit', segEdit); } break;
     case 'resume': if(resumeForm) resumeForm.fecha = el.value; break;
     case 'ans': setAnsField(el); break;
     case 'az': azure[el.dataset.k] = el.value; updateWiql(); break;
+    case 'azl': { const ap = currentProject(); if(!ap) break; if(!azForm || azForm.pid!==ap.id) azForm = azNew(ap); azForm[el.dataset.k] = el.value; azForm.preview = null; azForm.error = ''; break; }
     case 'newAnalyst': bit.newName = el.value; break;
     case 'slotD': { const x = slotOf(el.dataset.s); if(x){ x.d = el.value; queueSave(curKey()); } break; }
     case 'extrasNota': if(bit.analystId){ ensureDay(bit.analystId, bit.date).extrasNota = el.value; queueSave(curKey()); } break;
@@ -3782,6 +4105,8 @@ function onChange(e){
       else if(k==='crit'){ if(seg.tipo==='criterio_actualizado' && p && seg.hu!=='' && seg.crit!==''){ seg.nuevoTexto = p.historias[Number(seg.hu)].criterios[Number(seg.crit)].texto; } render(); }
       break;
     }
+    case 'cstate': startCritChange(Number(el.dataset.hu), Number(el.dataset.c), el.value); break;
+    case 'cdraft': { const i = Number(el.dataset.hu); (cdraft[i] = cdraft[i] || {crit:'', texto:''}).crit = el.value; break; }
     case 'segEdit': if(segEdit){ segEdit[el.dataset.k] = el.value; if(el.dataset.k==='prio') render(); } break;
     case 'ans': setAnsField(el); break;
     case 'az': azure[el.dataset.k] = el.value; updateWiql(); break;
@@ -3818,6 +4143,8 @@ async function boot(){
   try{ sampleNS = (window.claude && window.claude.use) ? await window.claude.use('sample') : null; }catch(e){ sampleNS = null; }
   sampleAvailable = !!sampleNS;
   try{ dlNS = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; }catch(e){ dlNS = null; }
+  /* Azure DevOps solo existe en la versión web, cuando el servidor tiene la llave configurada */
+  try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
 
   const who = $('#whoInput');
   const saved = lsGet('qacert_who'); if(saved) who.value = saved;
@@ -3842,7 +4169,7 @@ async function boot(){
     const sub = (col, q) => {
       try{
         q.onSnapshot(snap => { ingest(col, snap.docs.map(d => Object.assign({id:d.id}, d.data()))); softRender(); },
-          err => console.error('QA Certifica: error de sincronización (' + col + ')', err));
+          err => console.error('QUQI_QA: error de sincronización (' + col + ')', err));
       }catch(e){ console.error(e); }
     };
     sub('projects', dbNS.collection('projects').orderBy('createdAt','desc').limit(300));
@@ -3852,6 +4179,7 @@ async function boot(){
     sub('seguimiento', dbNS.collection('seguimiento').orderBy('ts','desc').limit(1000));
     sub('amb_hojas', dbNS.collection('amb_hojas').limit(30));
     sub('amb_hist', dbNS.collection('amb_hist').orderBy('fecha','desc').limit(1000));
+    if(azNS) sub('azure_bugs', dbNS.collection('azure_bugs').limit(400));
   }
 }
 boot();

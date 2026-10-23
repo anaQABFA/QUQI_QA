@@ -1,7 +1,7 @@
 {
-  "name": "qa-certifica",
+  "name": "quqi-qa",
   "version": "1.0.0",
-  "description": "QA Certifica — tablero de certificación de entregas de QA (Banco Finandina)",
+  "description": "QUQI_QA — tablero de certificación de entregas de QA (Banco Finandina)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

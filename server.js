@@ -6,6 +6,7 @@ const db = require('./lib/db');
 const auth = require('./lib/auth');
 const store = require('./lib/store');
 const ai = require('./lib/ai');
+const azure = require('./lib/azure');
 
 if (String(process.env.SESSION_SECRET || '').length < 32) { console.error('Falta SESSION_SECRET (mínimo 32 caracteres aleatorios).'); process.exit(1); }
 
@@ -98,6 +99,7 @@ async function backupInfo() {
 app.get('/api/me', wrap(async (req, res) => {
   const u = req.user;
   res.json({ user: { username: u.username, name: u.name, role: u.role, mustChange: u.must_change }, ai: { enabled: ai.enabled(), model: ai.enabled() ? ai.MODEL : null },
+    azure: { enabled: azure.enabled(), org: azure.enabled() ? azure.org() : null, project: azure.defaultProject() || null, syncMinutes: azure.syncMinutes() },
     backup: u.role === 'admin' ? await backupInfo() : null });
 }));
 app.post('/api/password', wrap(async (req, res) => {
@@ -120,7 +122,12 @@ app.get('/api/stream', (req, res) => {
   const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (e) {} }, 20000);
   req.on('close', () => { clearInterval(hb); clients.delete(res); });
 });
-const colOk = (req, res, next) => store.COLS.includes(req.params.col) && (!req.params.id || store.ID_RE.test(req.params.id)) ? next() : res.status(400).json({ error: 'Colección o id inválido.' });
+/* azure_bugs solo se lee desde el navegador; únicamente el servidor lo escribe (al sincronizar con Azure DevOps). */
+const colOk = (req, res, next) => {
+  const readOnly = req.params.col === 'azure_bugs' && req.method === 'GET';
+  const ok = (store.COLS.includes(req.params.col) || readOnly) && (!req.params.id || store.ID_RE.test(req.params.id));
+  return ok ? next() : res.status(400).json({ error: 'Colección o id inválido.' });
+};
 
 app.get('/api/docs/:col', colOk, wrap(async (req, res) => res.json(await store.listDocs(req.params.col))));
 app.post('/api/docs/:col', colOk, wrap(async (req, res) => {
@@ -137,7 +144,24 @@ app.patch('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
 }));
 app.delete('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
   await store.delDoc(req.params.col, req.params.id);
-  broadcast({ op: 'del', col: req.params.col, id: req.params.id }); res.json({ ok: true });
+  broadcast({ op: 'del', col: req.params.col, id: req.params.id });
+  if (req.params.col === 'projects') { await store.delDoc('azure_bugs', req.params.id); broadcast({ op: 'del', col: 'azure_bugs', id: req.params.id }); }
+  res.json({ ok: true });
+}));
+
+/* ---------- Azure DevOps (solo lectura) ---------- */
+const azErr = (res, e) => res.status((e && e.status) || 502).json({ error: (e && e.msg) || 'No se pudo consultar Azure DevOps.', code: (e && e.code) || 'azure' });
+app.post('/api/azure/test', wrap(async (req, res) => {
+  if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
+  if (!azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas. Espera unos minutos.', code: 'rate_limited' });
+  try { res.json(await azure.preview(req.body)); } catch (e) { azErr(res, e); }
+}));
+app.post('/api/azure/sync/:id', wrap(async (req, res) => {
+  if (!store.ID_RE.test(req.params.id)) return res.status(400).json({ error: 'Id inválido.' });
+  if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
+  const force = !!(req.body && req.body.force);
+  if (force && !azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas sincronizaciones seguidas. Espera unos minutos.', code: 'rate_limited' });
+  try { res.json(await azure.syncProject(req.params.id, req.user.name, { force, broadcast })); } catch (e) { azErr(res, e); }
 }));
 
 /* ---------- IA (Gemini) ---------- */
@@ -184,8 +208,8 @@ app.patch('/api/admin/users/:id', adminOnly, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 app.get('/api/admin/backup', adminOnly, wrap(async (req, res) => {
-  const out = { app: 'qa-certifica', formato: 1, exportadoEn: new Date().toISOString(), exportadoPor: req.user.username, collections: await store.exportAll() };
-  res.setHeader('Content-Disposition', 'attachment; filename="qa-certifica-respaldo-' + new Date().toISOString().slice(0, 10) + '.json"');
+  const out = { app: 'quqi-qa', formato: 1, exportadoEn: new Date().toISOString(), exportadoPor: req.user.username, collections: await store.exportAll() };
+  res.setHeader('Content-Disposition', 'attachment; filename="quqi-qa-respaldo-' + new Date().toISOString().slice(0, 10) + '.json"');
   res.json(out);
 }));
 app.get('/api/admin/backup-data', adminOnly, wrap(async (req, res) => res.json(await store.exportAll())));
@@ -194,8 +218,8 @@ app.post('/api/admin/backup-done', adminOnly, wrap(async (req, res) => {
   res.json(await backupInfo());
 }));
 app.post('/api/admin/restore', adminOnly, wrap(async (req, res) => {
-  const b = req.body || {}; const cols = b.collections || (b.app === 'qa-certifica' ? b.collections : null);
-  if (!cols || typeof cols !== 'object') return res.status(400).json({ error: 'El archivo no tiene el formato de un respaldo de QA Certifica.' });
+  const b = req.body || {}; const cols = b.collections || ((b.app === 'quqi-qa' || b.app === 'qa-certifica') ? b.collections : null);
+  if (!cols || typeof cols !== 'object') return res.status(400).json({ error: 'El archivo no tiene el formato de un respaldo de QUQI_QA.' });
   const stat = await store.restoreDocs(cols, b.mode === 'replace' ? 'replace' : 'merge', req.user.name);
   broadcast({ op: 'resync' });
   res.json(stat);
@@ -208,5 +232,5 @@ app.use((req, res) => res.status(404).type('text').send('No encontrado'));
   await db.init();
   await auth.bootstrapAdmin();
   const port = process.env.PORT || 3000;
-  app.listen(port, () => console.log('QA Certifica escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)')));
+  app.listen(port, () => { azure.startScheduler(broadcast); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
 })().catch(e => { console.error('No se pudo iniciar:', e.message); process.exit(1); });

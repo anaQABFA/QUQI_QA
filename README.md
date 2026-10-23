@@ -1,4 +1,4 @@
-# QA Certifica — versión web (Render + Neon + Gemini)
+# QUQI_QA — versión web (Render + Neon + Gemini)
 
 Tablero de certificación de entregas de QA del Banco Finandina, ahora como aplicación web propia:
 
@@ -12,22 +12,22 @@ Tablero de certificación de entregas de QA del Banco Finandina, ahora como apli
 ## 1. Crear la base de datos en Neon (5 min)
 
 1. Entra a <https://neon.tech> y crea una cuenta (plan gratuito).
-2. **Create project** → nombre `qa-certifica`, región la más cercana (p. ej. `AWS US East`), versión de Postgres por defecto.
+2. **Create project** → nombre `quqi-qa`, región la más cercana (p. ej. `AWS US East`), versión de Postgres por defecto.
 3. En el panel del proyecto pulsa **Connect** y copia la **connection string**. Se ve así:
    `postgresql://usuario:clave@ep-xxxx.us-east-2.aws.neon.tech/neondb?sslmode=require`
    Guárdala: es la variable `DATABASE_URL`. No necesitas crear tablas; la app las crea sola al arrancar.
 
 ## 2. Subir el código a GitHub (privado)
 
-1. En <https://github.com> crea un repositorio **privado** llamado `qa-certifica`.
+1. En <https://github.com> crea un repositorio **privado** llamado `quqi-qa`.
 2. Desde esta carpeta (necesitas Git instalado):
 
 ```bash
 git init
 git add .
-git commit -m "QA Certifica web"
+git commit -m "QUQI_QA web"
 git branch -M main
-git remote add origin https://github.com/TU_USUARIO/qa-certifica.git
+git remote add origin https://github.com/TU_USUARIO/quqi-qa.git
 git push -u origin main
 ```
 
@@ -45,7 +45,7 @@ git push -u origin main
 **Opción A – Blueprint (recomendada, usa el `render.yaml`)**
 
 1. En <https://render.com> crea una cuenta y conéctala a tu GitHub.
-2. **New + → Blueprint** → elige el repositorio `qa-certifica` → **Apply**.
+2. **New + → Blueprint** → elige el repositorio `quqi-qa` → **Apply**.
 3. Render te pedirá las variables que no están en el archivo:
    - `DATABASE_URL` → la cadena de Neon (paso 1).
    - `ADMIN_PASSWORD` → la clave inicial de Ana (mínimo 10 caracteres, letras y números).
@@ -69,7 +69,7 @@ git push -u origin main
 ## 5. Primer ingreso y migración de datos
 
 1. Abre la URL de Render, entra con `ana` y la `ADMIN_PASSWORD`.
-2. Pulsa **Administración** (arriba a la derecha) → **Restaurar desde un archivo** → elige `qa-certifica-datos-actuales.json` (el archivo con lo que ya tenías en Claude) → modo **Combinar** → **Restaurar**. Recarga el tablero: aparecen tus proyectos, seguimiento, bitácora y ambientes.
+2. Pulsa **Administración** (arriba a la derecha) → **Restaurar desde un archivo** → elige `quqi-qa-datos-actuales.json` (el archivo con lo que ya tenías en Claude) → modo **Combinar** → **Restaurar**. Recarga el tablero: aparecen tus proyectos, seguimiento, bitácora y ambientes.
 3. En **Usuarios** crea una cuenta por analista (usuario, nombre, contraseña temporal). Cada persona debe cambiar su clave en el primer ingreso. Comparte usuario y clave temporal por un canal seguro (no por el mismo chat/correo público).
 4. Desde ahí, el campo «Registrado por» se llena solo con el nombre de cada usuario.
 
@@ -80,13 +80,22 @@ git push -u origin main
 - **Recuperación total:** crea una base nueva en Neon, apunta `DATABASE_URL` a ella y ejecuta `node scripts/import.js respaldo.json --con-usuarios` (o usa Administración → Restaurar con el JSON del botón).
 - Neon además conserva un historial corto de cambios para volver atrás en el tiempo; revisa en su panel el periodo vigente de tu plan.
 
+## 6b. Conexión con Azure DevOps (bugs por proyecto, solo lectura)
+
+1. En Azure DevOps: *User settings → Personal access tokens → New Token*. Organización: la tuya; vencimiento: el más corto que te sirva (p. ej. 90 días); permisos: **Custom defined → Work Items → Read** (nada más). Copia el token una sola vez.
+2. En Render → *Environment* agrega: `AZURE_DEVOPS_ORG` (lo que va después de `dev.azure.com/`), `AZURE_DEVOPS_PAT` (el token) y, si casi todo está en un solo proyecto de Azure, `AZURE_DEVOPS_PROJECT`. Opcional: `AZURE_SYNC_MINUTES` (por defecto 30) y `AZURE_BUG_TYPES` (por defecto `Bug`). Guarda: Render redespliega solo.
+3. En la pantalla de cada proyecto aparece el panel **Azure DevOps**: indica área/ruta, iteración (sprint), etiqueta y/o ID del padre (Epic, Feature o HU); pulsa **Probar consulta** y luego **Guardar vínculo**. Los bugs se actualizan solos cada 30 min mientras el proyecto esté abierto, al abrirlo si los datos tienen más de 2 min, o con **Sincronizar ahora**.
+4. La llave nunca llega al navegador, la conexión solo lee, y los bugs traídos de Azure no se incluyen en el respaldo (se vuelven a generar). Si la llave vence o es inválida, el panel muestra el motivo y conserva los últimos datos.
+
+Nota: en el plan gratuito de Render el servicio duerme sin visitas, así que la actualización automática solo corre mientras está despierto; por eso también se sincroniza al abrir el proyecto.
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.
 - **Límites gratuitos:** las cuotas de Render, Neon y Gemini cambian con el tiempo; revisa sus páginas de precios vigentes. Para este volumen (unas pocas personas, miles de registros) el uso esperado es muy bajo.
 - **Seguridad incluida:** HTTPS (de Render), contraseñas cifradas con scrypt, sesión por cookie `HttpOnly` + `Secure` de 12 h, bloqueo temporal tras intentos fallidos, protección CSRF por origen, cabeceras de seguridad (CSP, HSTS, etc.), roles (administrador / analista), usuarios desactivables al instante. La llave de Gemini nunca llega al navegador.
 - **Aprobación interna:** al ser una herramienta con datos del banco en servicios de terceros (Render, Neon, Google), conviene el visto bueno de Seguridad/TI antes de abrirla a todo el equipo.
-- **Qué no hace (igual que dentro de Claude):** no envía correos ni crea issues en Azure DevOps por sí sola; redacta los mensajes y tú los copias. La conexión en vivo con Azure y el envío automático de recordatorios requerirían una integración adicional (credenciales guardadas en el servidor).
+- **Qué no hace (igual que dentro de Claude):** no envía correos ni crea issues en Azure DevOps por sí sola; redacta los mensajes y tú los copias. El envío automático de recordatorios requeriría una integración adicional. La lectura de bugs de Azure está en la sección 6b (solo lectura).
 - **Cambiar el nombre/URL:** en Render → Settings → *Custom Domain* puedes usar un dominio propio.
 
 ## 8. Problemas frecuentes
@@ -99,6 +108,8 @@ git push -u origin main
 | La IA dice «no está activada» | Falta `GEMINI_API_KEY` en Render. |
 | La IA dice «llave no válida» | La llave es incorrecta, está restringida o fue revocada: genera otra en AI Studio y actualízala en Render. |
 | La IA dice «Demasiadas solicitudes» | Se alcanzó la cuota por minuto/día de Gemini; espera o cambia a un plan de pago. |
+| El panel de Azure dice «rechazó la llave» / «no tiene permiso» | El PAT es inválido, venció o no tiene *Work Items → Read*: genera uno nuevo y actualiza `AZURE_DEVOPS_PAT` en Render. |
+| El panel de Azure dice «no se encontró la organización o el proyecto» | Revisa `AZURE_DEVOPS_ORG` y el nombre exacto del proyecto de Azure. |
 | «Sesión vencida» | La sesión dura 12 h; vuelve a ingresar. |
 
 ## 9. Desarrollo local

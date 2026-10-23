@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: qa-certifica
+    name: quqi-qa
     runtime: node
     plan: free
     buildCommand: npm ci --omit=dev
@@ -25,3 +25,11 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      - key: AZURE_DEVOPS_ORG    # nombre de tu organización en Azure DevOps (dev.azure.com/<ORG>). Opcional
+        sync: false
+      - key: AZURE_DEVOPS_PAT    # llave personal de SOLO LECTURA (Work Items: Read). Opcional
+        sync: false
+      - key: AZURE_DEVOPS_PROJECT  # proyecto de Azure por defecto (cada proyecto de QUQI_QA puede indicar otro)
+        sync: false
+      - key: AZURE_SYNC_MINUTES  # cada cuántos minutos se actualizan los bugs solos (mínimo 5)
+        value: "30"
