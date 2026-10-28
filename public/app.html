@@ -456,7 +456,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js"></script>
+<script src="/shim.js?v=20261028"></script>
 <script>
 (function(){
 'use strict';
@@ -2530,7 +2530,8 @@ function tpFormHtml(p, f){
   const ph = (azInfo && azInfo.testProject) || 'Gestion Proyectos';
   const fld = (k, label, hint) => `<div><label class="field-label" for="tp_${k}">${label}</label><input type="text" id="tp_${k}" data-f="tpf" data-k="${k}" value="${escapeHtml(f[k])}" placeholder="${escapeHtml(hint)}" autocomplete="off" /></div>`;
   return `<div class="panel"><div class="panel-head"><div><h2>% de QA certificado · Azure Test Plans</h2><p class="hint">Trae los casos de prueba del plan de este proyecto (los mismos del <em>Progress report</em> de Azure). Solo lectura: Azure no se modifica.</p></div></div>
-    <div class="rowgrid">${fld('proyecto','Proyecto de Azure del plan de pruebas', ph)}${fld('plan','Plan de pruebas (nombre o ID)','Ej.: 036. Eco-Nómina')}</div>
+    <div class="rowgrid">${fld('proyecto','Proyecto de Azure del plan de pruebas', ph)}${fld('plan','Plan de pruebas (nombre, ID o dirección de Azure)','Ej.: 036. Eco-Nómina')}</div>
+    <p class="small" style="margin:6px 0 0;">Puedes escribir el nombre del plan, su ID (el número después de «planId=» en la dirección de Azure Test Plans) o pegar la dirección completa.</p>
     ${f.error ? `<div class="banner banner-warn" style="margin-top:12px;"><span>⚠️</span><span>${escapeHtml(f.error)}</span></div>` : ''}${f.preview ? tpPreviewHtml(f.preview) : ''}
     <div class="flexend"><button class="btn btn-ghost" data-act="tp-test" type="button" ${f.busy?'disabled':''}>${f.busy==='test' ? 'Consultando…' : 'Probar consulta'}</button><button class="btn btn-ghost" data-act="tp-cancel" type="button">Cancelar</button><button class="btn btn-primary" data-act="tp-save" type="button" ${f.busy?'disabled':''}>${f.busy==='save' ? 'Guardando…' : 'Guardar vínculo y traer casos'}</button></div></div>`;
 }
@@ -3917,11 +3918,12 @@ async function figSaveComment(){
 }
 
 /* ---- Azure Test Plans: avance de pruebas (solo lectura) ---- */
+function tpApi(){ if(!azNS || typeof azNS.testPlan!=='function') throw {message:'Tu navegador tiene una versión vieja de la página. Recárgala con Ctrl + F5 (o Ctrl + Shift + R) y vuelve a intentarlo.'}; return azNS.testPlan; }
 async function tpTest(){
   const p = currentProject(); if(!p || !tpForm) return; const f = tpForm;
   if(!f.plan.trim()){ f.error = 'Escribe el nombre o el ID del plan de pruebas.'; f.preview = null; render(); return; }
   f.busy = 'test'; f.error = ''; f.preview = null; render();
-  try{ const r = await azNS.testPlan({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); if(tpForm===f) f.preview = r; }
+  try{ const r = await tpApi()({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); if(tpForm===f) f.preview = r; }
   catch(e){ if(tpForm===f) f.error = azErrText(e); }
   if(tpForm===f){ f.busy = false; render(); }
 }
@@ -3930,9 +3932,9 @@ async function tpSave(){
   if(!f.plan.trim()){ f.error = 'Escribe el nombre o el ID del plan de pruebas.'; render(); return; }
   f.busy = 'save'; f.error = ''; render();
   let r;
-  try{ r = await azNS.testPlan({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); }
+  try{ r = await tpApi()({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); }
   catch(e){ if(tpForm===f){ f.busy = false; f.error = azErrText(e); render(); } return; }
-  const cfg = {proyecto:f.proyecto.trim(), plan:String(r.plan.id), planNombre:r.plan.name};
+  const cfg = {proyecto:r.proyecto || f.proyecto.trim(), plan:String(r.plan.id), planNombre:r.plan.name};
   tpForm = null;
   await patchProject(np => { np.azureTest = cfg; });
   toast('Vínculo con Azure Test Plans guardado');
