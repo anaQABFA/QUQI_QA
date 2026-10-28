@@ -174,6 +174,12 @@ app.post('/api/ai', wrap(async (req, res) => {
   catch (e) { res.status(e && e.code === 'rate_limited' ? 429 : 502).json({ code: (e && e.code) || 'upstream' }); }
 }));
 
+app.post('/api/ai/test', adminOnly, wrap(async (req, res) => {
+  if (!ai.enabled()) return res.status(503).json({ ok: false, code: 'sampling_disabled' });
+  try { const d = await ai.askJson('Responde solo con este JSON: {"ok": true}'); res.json({ ok: !!(d && d.ok), model: ai.MODEL }); }
+  catch (e) { res.status(502).json({ ok: false, code: (e && e.code) || 'upstream', model: ai.MODEL }); }
+}));
+
 /* ---------- administración ---------- */
 const USER_COLS = 'id, username, name, role, must_change, active, created_at, last_login';
 app.get('/api/admin/users', adminOnly, wrap(async (req, res) => res.json((await db.q(`SELECT ${USER_COLS} FROM users ORDER BY username`)).rows)));
