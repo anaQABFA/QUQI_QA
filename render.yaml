@@ -31,5 +31,7 @@ services:
         sync: false
       - key: AZURE_DEVOPS_PROJECT  # proyecto de Azure por defecto (cada proyecto de QUQI_QA puede indicar otro)
         sync: false
+      - key: AZURE_TEST_PROJECT  # opcional: proyecto de Azure donde están los planes de pruebas (Test Plans); si no, se usa AZURE_DEVOPS_PROJECT
+        sync: false
       - key: AZURE_SYNC_MINUTES  # cada cuántos minutos se actualizan los bugs solos (mínimo 5)
         value: "30"

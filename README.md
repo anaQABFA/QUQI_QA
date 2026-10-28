@@ -82,10 +82,16 @@ git push -u origin main
 
 ## 6b. Conexión con Azure DevOps (bugs por proyecto, solo lectura)
 
-1. En Azure DevOps: *User settings → Personal access tokens → New Token*. Organización: la tuya; vencimiento: el más corto que te sirva (p. ej. 90 días); permisos: **Custom defined → Work Items → Read** (nada más). Copia el token una sola vez.
+1. En Azure DevOps: *User settings → Personal access tokens → New Token*. Organización: la tuya; vencimiento: el más corto que te sirva (p. ej. 90 días); permisos: **Custom defined → Work Items → Read** y, si vas a traer el avance de pruebas (6c), también **Test Management → Read** (nada más). Copia el token una sola vez.
 2. En Render → *Environment* agrega: `AZURE_DEVOPS_ORG` (lo que va después de `dev.azure.com/`), `AZURE_DEVOPS_PAT` (el token) y, si casi todo está en un solo proyecto de Azure, `AZURE_DEVOPS_PROJECT`. Opcional: `AZURE_SYNC_MINUTES` (por defecto 30) y `AZURE_BUG_TYPES` (por defecto `Bug`). Guarda: Render redespliega solo.
 3. En la pantalla de cada proyecto aparece el panel **Azure DevOps**: indica área/ruta, iteración (sprint), etiqueta y/o ID del padre (Epic, Feature o HU); pulsa **Probar consulta** y luego **Guardar vínculo**. Los bugs se actualizan solos cada 30 min mientras el proyecto esté abierto, al abrirlo si los datos tienen más de 2 min, o con **Sincronizar ahora**.
 4. La llave nunca llega al navegador, la conexión solo lee, y los bugs traídos de Azure no se incluyen en el respaldo (se vuelven a generar). Si la llave vence o es inválida, el panel muestra el motivo y conserva los últimos datos.
+
+## 6c. Avance de pruebas desde Azure Test Plans (% de QA certificado)
+
+1. La llave (PAT) necesita además el permiso **Test Management → Read**. Si los planes de pruebas están en otro proyecto de Azure que los bugs, agrega en Render `AZURE_TEST_PROJECT` (por ejemplo `Gestion Proyectos`); también se puede escribir el proyecto en cada vínculo.
+2. En el proyecto de QUQI_QA (ya recibido en QA), panel **% de QA certificado → Conectar con Azure Test Plans**: escribe el nombre o el ID del plan (por ejemplo `036. Eco-Nómina`), pulsa **Probar consulta** y compara los números con el *Progress report* de Azure (Test Plans → Progress report): deben coincidir. Luego **Guardar vínculo**.
+3. Fórmula: casos aplicables = total − no aplicables (esa base es el 100 %); se muestran exitosos, fallidos, bloqueados, pausados y pendientes sobre esa base. El % certificado es exitosos / aplicables. Se actualiza solo junto con los bugs.
 
 Nota: en el plan gratuito de Render el servicio duerme sin visitas, así que la actualización automática solo corre mientras está despierto; por eso también se sincroniza al abrir el proyecto.
 

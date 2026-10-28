@@ -99,7 +99,7 @@ async function backupInfo() {
 app.get('/api/me', wrap(async (req, res) => {
   const u = req.user;
   res.json({ user: { username: u.username, name: u.name, role: u.role, mustChange: u.must_change }, ai: { enabled: ai.enabled(), model: ai.enabled() ? ai.MODEL : null },
-    azure: { enabled: azure.enabled(), org: azure.enabled() ? azure.org() : null, project: azure.defaultProject() || null, syncMinutes: azure.syncMinutes() },
+    azure: { enabled: azure.enabled(), org: azure.enabled() ? azure.org() : null, project: azure.defaultProject() || null, testProject: azure.testProject() || null, syncMinutes: azure.syncMinutes() },
     backup: u.role === 'admin' ? await backupInfo() : null });
 }));
 app.post('/api/password', wrap(async (req, res) => {
@@ -155,6 +155,11 @@ app.post('/api/azure/test', wrap(async (req, res) => {
   if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
   if (!azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas. Espera unos minutos.', code: 'rate_limited' });
   try { res.json(await azure.preview(req.body)); } catch (e) { azErr(res, e); }
+}));
+app.post('/api/azure/test-plan', wrap(async (req, res) => {
+  if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
+  if (!azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas. Espera unos minutos.', code: 'rate_limited' });
+  try { res.json(await azure.previewTests(req.body)); } catch (e) { azErr(res, e); }
 }));
 app.post('/api/azure/sync/:id', wrap(async (req, res) => {
   if (!store.ID_RE.test(req.params.id)) return res.status(400).json({ error: 'Id inválido.' });

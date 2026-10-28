@@ -1630,7 +1630,7 @@ let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinc
 let figForm = null, figEdit = null, figDel = null;
 /* Recepción en QA: formulario de fecha y confirmación de deshacer */
 let recForm = null, recUndo = false;
-let pruForm = null, azFilt = {};
+let pruForm = null, azFilt = {}, tpForm = null;
 let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
@@ -2468,7 +2468,8 @@ function viewProjectDetail(){
 }
 
 /* ================= Azure DevOps (bugs en vivo, solo lectura) ================= */
-function azDoc(p){ return p && p.azureCfg ? (azBugs.get(p.id) || null) : null; }
+function azDoc(p){ return p && (p.azureCfg || p.azureTest) ? (azBugs.get(p.id) || null) : null; }
+function tpNew(p){ const c = p.azureTest || {}; return { pid:p.id, proyecto:c.proyecto||'', plan:c.planNombre||c.plan||'', error:'', preview:null, busy:false }; }
 function azNew(p){ const c = p.azureCfg || {}; return { pid:p.id, proyecto:c.proyecto||'', area:c.area||'', iteracion:c.iteracion||'', tag:c.tag||'', padre:c.padre||'', preview:null, error:'', busy:false }; }
 function azCfgFrom(f){ return { proyecto:(f.proyecto||'').trim(), area:(f.area||'').trim(), iteracion:(f.iteracion||'').trim(), tag:(f.tag||'').trim(), padre:String(f.padre||'').replace(/^#/,'').trim() }; }
 function azCfgProblem(c){
@@ -2521,11 +2522,50 @@ function pruResultHtml(c){
     <div class="clkstats">${t('Exitosos (certificados)', c.ok, c.cert, 'var(--good)')}${t('Fallidos por bug', c.fail, c.pFail, 'var(--critical)')}${t('Bloqueados por ambiente', c.block, c.pBlock, 'var(--serious)')}${t('Pausados', c.pause, c.pPause, 'var(--warning)')}${t('Pendientes de probar', c.pend, c.pPend, 'var(--gridline)')}${t('No aplicables', c.na, null, 'var(--border)', 'fuera de la base')}</div>
     <p class="small" style="margin:10px 0 0;">Probado: <strong>${c.ok + c.fail} de ${c.base}</strong> (${fmtPct(c.probado)})${c.exito!=null ? ' · Éxito sobre lo probado: <strong>' + fmtPct(c.exito) + '</strong>' : ''}${c.pend + c.block + c.pause + c.fail > 0 ? ' · Falta certificar ' + (c.base - c.ok) + ' caso(s).' : ''}</p>`;
 }
+function tpPreviewHtml(r){
+  const c = r.counts || {};
+  return `<div class="banner banner-info" style="margin-top:12px;"><span>✅</span><span>Plan <strong>«${escapeHtml(r.plan.name)}»</strong> (ID ${escapeHtml(r.plan.id)}) en «${escapeHtml(r.proyecto)}»: <strong>${r.total} casos de prueba</strong> en ${r.suites} suite(s). Exitosos ${c.ok} · Fallidos ${c.fail} · Bloqueados ${c.block} · No aplicables ${c.na} · Pausados ${c.pause} · Sin ejecutar ${c.pend}. Compáralos con el <em>Progress report</em> de Azure.</span></div>`;
+}
+function tpFormHtml(p, f){
+  const ph = (azInfo && azInfo.testProject) || 'Gestion Proyectos';
+  const fld = (k, label, hint) => `<div><label class="field-label" for="tp_${k}">${label}</label><input type="text" id="tp_${k}" data-f="tpf" data-k="${k}" value="${escapeHtml(f[k])}" placeholder="${escapeHtml(hint)}" autocomplete="off" /></div>`;
+  return `<div class="panel"><div class="panel-head"><div><h2>% de QA certificado · Azure Test Plans</h2><p class="hint">Trae los casos de prueba del plan de este proyecto (los mismos del <em>Progress report</em> de Azure). Solo lectura: Azure no se modifica.</p></div></div>
+    <div class="rowgrid">${fld('proyecto','Proyecto de Azure del plan de pruebas', ph)}${fld('plan','Plan de pruebas (nombre o ID)','Ej.: 036. Eco-Nómina')}</div>
+    ${f.error ? `<div class="banner banner-warn" style="margin-top:12px;"><span>⚠️</span><span>${escapeHtml(f.error)}</span></div>` : ''}${f.preview ? tpPreviewHtml(f.preview) : ''}
+    <div class="flexend"><button class="btn btn-ghost" data-act="tp-test" type="button" ${f.busy?'disabled':''}>${f.busy==='test' ? 'Consultando…' : 'Probar consulta'}</button><button class="btn btn-ghost" data-act="tp-cancel" type="button">Cancelar</button><button class="btn btn-primary" data-act="tp-save" type="button" ${f.busy?'disabled':''}>${f.busy==='save' ? 'Guardando…' : 'Guardar vínculo y traer casos'}</button></div></div>`;
+}
+function pruHistHtml(rows){
+  return rows.length > 1 ? `<details class="crit" data-key="pruhist" ${openDetails.has('pruhist')?'open':''}><summary>Historial de avance (${rows.length})</summary><div class="scroll-y"><table class="stack"><thead><tr><th>Fecha</th><th>Certificado</th><th>Probado</th><th>Exitosos</th><th>Fallidos</th><th>Bloqueados</th><th>Pausados</th><th>No aplic.</th><th>Origen</th></tr></thead><tbody>${rows.map(h => { const k = pruCalc(h); return `<tr><td data-label="Fecha">${fmtDateTime(h.at)}</td><td data-label="Certificado">${k.valid ? fmtPct(k.cert) : '—'}</td><td data-label="Probado">${k.valid ? fmtPct(k.probado) : '—'}</td><td data-label="Exitosos">${k.ok}</td><td data-label="Fallidos">${k.fail}</td><td data-label="Bloqueados">${k.block}</td><td data-label="Pausados">${k.pause}</td><td data-label="No aplic.">${k.na}</td><td data-label="Origen">${escapeHtml(h.by||'Azure')}</td></tr>`; }).join('')}</tbody></table></div></details>` : '';
+}
 function pruebasPanel(p){
   if(!isReceived(p)) return '';
-  const closed = isClosed(p), saved = p.pruebas || null;
-  const editing = pruForm && pruForm.pid===p.id && !closed;
+  const closed = isClosed(p);
+  if(tpForm && tpForm.pid===p.id && !closed) return tpFormHtml(p, tpForm);
   const head = (hint, right) => `<div class="panel-head"><div><h2>% de QA certificado</h2><p class="hint">${hint}</p></div>${right||''}</div>`;
+  const doc = azDoc(p), openBugs = doc && doc.bugs && doc.bugs.length ? doc.bugs.filter(b => !isClosedState(b.e)).length : null;
+  const warnBugs = c => c.valid && c.fail>0 && openBugs!=null && c.fail>openBugs ? `<div class="banner banner-warn" style="margin-top:10px;"><span>⚠️</span><span>Hay ${c.fail} casos fallidos y solo ${openBugs} bug(s) abiertos en Azure: verifica que cada caso fallido tenga su bug.</span></div>` : '';
+  const bigRight = c => c.valid ? `<div style="text-align:right"><div class="pru-big num">${fmtPct(c.cert)}</div><div class="small">certificado (exitosos / aplicables)</div></div>` : '';
+
+  /* ---- origen: Azure Test Plans ---- */
+  if(p.azureTest && azNS){
+    const t = doc && doc.tests ? doc.tests : null, busy = azBusy.has(p.id);
+    const nombre = (t && t.plan && t.plan.name) || p.azureTest.planNombre || p.azureTest.plan;
+    const acts = closed ? '' : `<div class="flexend"><button class="btn btn-sm" data-act="az-sync" type="button" ${busy?'disabled':''}>${busy ? 'Sincronizando…' : '↻ Sincronizar ahora'}</button><button class="btn btn-sm btn-ghost" data-act="tp-edit" type="button">Editar vínculo</button><button class="btn btn-sm btn-ghost" data-act="tp-unlink" type="button">Quitar vínculo</button></div>`;
+    const errs = [doc && doc.testsError ? `No se pudo actualizar${doc.testsErrorAt ? ' (' + fmtDateTime(doc.testsErrorAt) + ')' : ''}: ${doc.testsError}${t ? ' Se muestran los datos de la última sincronización buena.' : ''}` : '', !p.azureCfg && azMsg[p.id] ? azMsg[p.id] : ''].filter(Boolean)
+      .map(m => `<div class="banner banner-warn" style="margin-bottom:12px;"><span>⚠️</span><span>${escapeHtml(m)}</span></div>`).join('');
+    if(!t) return `<div class="panel">${head('Casos de prueba traídos de Azure Test Plans (plan «' + escapeHtml(nombre) + '»).')}${errs}<p class="small">${busy ? 'Consultando Azure DevOps…' : 'Aún no se ha sincronizado.'}</p>${acts}</div>`;
+    const c = pruCalc({total:t.total, na:t.counts.na, ok:t.counts.ok, fail:t.counts.fail, block:t.counts.block, pause:t.counts.pause});
+    const link = t.webUrl && /^https?:\/\//i.test(t.webUrl) ? ` <a class="az-link" href="${escapeHtml(t.webUrl)}" target="_blank" rel="noopener noreferrer">Ver reporte en Azure ↗</a>` : '';
+    const hist = pruHistHtml((doc.testsHist || []).slice(-8).reverse());
+    return `<div class="panel">${head('Probado vs. certificado sobre los casos aplicables (los no aplicables salen de la base). Datos de Azure Test Plans, plan <strong>«' + escapeHtml(nombre) + '»</strong>' + (t.suites ? ' (' + t.suites + ' suites)' : '') + ' · sincronizado ' + fmtDateTime(t.syncedAt) + ' (' + azAgo(t.syncedAt) + ')' + (azInfo && azInfo.syncMinutes ? ' · se actualiza solo cada ' + azInfo.syncMinutes + ' min' : '') + '.' + link, bigRight(c))}
+      ${errs}${c.valid ? pruResultHtml(c) : `<div class="banner banner-warn"><span>⚠️</span><span>${c.errors.map(escapeHtml).join('<br>')}</span></div>`}${warnBugs(c)}
+      <p class="small" style="margin:8px 0 0;">Ojo: el «Pass rate» de Azure se mide sobre lo ejecutado; el % certificado de aquí se mide sobre todos los casos aplicables.</p>${hist}${acts}</div>`;
+  }
+
+  /* ---- origen: registro manual ---- */
+  const saved = p.pruebas || null;
+  const editing = pruForm && pruForm.pid===p.id && !closed;
+  const connect = azNS && !closed ? '<button class="btn btn-sm" data-act="tp-edit" type="button">Conectar con Azure Test Plans</button>' : '';
   if(editing){
     const f = pruForm, c = pruCalc(f);
     const fld = (k, label, ph) => `<div><label class="field-label" for="pru_${k}">${label}</label><input type="number" min="0" step="1" inputmode="numeric" id="pru_${k}" data-f="pru" data-k="${k}" value="${escapeHtml(String(f[k]))}" placeholder="${ph}" /></div>`;
@@ -2538,16 +2578,12 @@ function pruebasPanel(p){
   if(!saved){
     return `<div class="panel">${head('Probado vs. certificado: compara los casos exitosos contra los casos aplicables (total menos no aplicables).')}
       <div class="empty">Aún no se registra el avance de pruebas.</div>
-      ${closed ? '' : '<div class="flexend"><button class="btn btn-primary" data-act="pru-edit" type="button">Registrar avance de pruebas</button></div>'}</div>`;
+      ${closed ? '' : `<div class="flexend">${connect}<button class="btn btn-primary" data-act="pru-edit" type="button">Registrar avance a mano</button></div>`}</div>`;
   }
-  const c = pruCalc(saved), doc = azDoc(p), openBugs = doc ? (doc.bugs || []).filter(b => !isClosedState(b.e)).length : null;
-  const right = c.valid ? `<div style="text-align:right"><div class="pru-big num">${fmtPct(c.cert)}</div><div class="small">certificado (exitosos / aplicables)</div></div>` : '';
-  const warnBug = c.valid && c.fail>0 && openBugs!=null && c.fail>openBugs ? `<div class="banner banner-warn" style="margin-top:10px;"><span>⚠️</span><span>Hay ${c.fail} casos fallidos y solo ${openBugs} bug(s) abiertos en Azure: verifica que cada caso fallido tenga su bug.</span></div>` : '';
-  const hist = (p.pruebasHist || []).slice(-8).reverse();
-  const histHtml = hist.length > 1 ? `<details class="crit" data-key="pruhist" ${openDetails.has('pruhist')?'open':''}><summary>Historial de avance (${hist.length})</summary><div class="scroll-y"><table class="stack"><thead><tr><th>Fecha</th><th>Certificado</th><th>Probado</th><th>Exitosos</th><th>Fallidos</th><th>Bloqueados</th><th>Pausados</th><th>No aplic.</th><th>Registró</th></tr></thead><tbody>${hist.map(h => { const k = pruCalc(h); return `<tr><td data-label="Fecha">${fmtDateTime(h.at)}</td><td data-label="Certificado">${k.valid ? fmtPct(k.cert) : '—'}</td><td data-label="Probado">${k.valid ? fmtPct(k.probado) : '—'}</td><td data-label="Exitosos">${k.ok}</td><td data-label="Fallidos">${k.fail}</td><td data-label="Bloqueados">${k.block}</td><td data-label="Pausados">${k.pause}</td><td data-label="No aplic.">${k.na}</td><td data-label="Registró">${escapeHtml(h.by||'—')}</td></tr>`; }).join('')}</tbody></table></div></details>` : '';
-  return `<div class="panel">${head('Probado vs. certificado sobre los casos aplicables (los no aplicables salen de la base).' + (saved.at ? ' Actualizado ' + fmtDateTime(saved.at) + (saved.by ? ' por ' + escapeHtml(saved.by) : '') + '.' : ''), right)}
-    ${c.valid ? pruResultHtml(c) : `<div class="banner banner-warn"><span>⚠️</span><span>${c.errors.map(escapeHtml).join('<br>')}</span></div>`}${warnBug}${histHtml}
-    ${closed ? '' : '<div class="flexend"><button class="btn btn-sm" data-act="pru-edit" type="button">Actualizar avance</button></div>'}</div>`;
+  const c = pruCalc(saved);
+  return `<div class="panel">${head('Probado vs. certificado sobre los casos aplicables (los no aplicables salen de la base).' + (saved.at ? ' Actualizado ' + fmtDateTime(saved.at) + (saved.by ? ' por ' + escapeHtml(saved.by) : '') + '.' : ''), bigRight(c))}
+    ${c.valid ? pruResultHtml(c) : `<div class="banner banner-warn"><span>⚠️</span><span>${c.errors.map(escapeHtml).join('<br>')}</span></div>`}${warnBugs(c)}${pruHistHtml((p.pruebasHist || []).slice(-8).reverse())}
+    ${closed ? '' : `<div class="flexend">${connect}<button class="btn btn-sm" data-act="pru-edit" type="button">Actualizar avance</button></div>`}</div>`;
 }
 function azurePanel(p){
   if(!azNS || isClosed(p)) return '';
@@ -3880,19 +3916,42 @@ async function figSaveComment(){
   toast('Comentario guardado');
 }
 
+/* ---- Azure Test Plans: avance de pruebas (solo lectura) ---- */
+async function tpTest(){
+  const p = currentProject(); if(!p || !tpForm) return; const f = tpForm;
+  if(!f.plan.trim()){ f.error = 'Escribe el nombre o el ID del plan de pruebas.'; f.preview = null; render(); return; }
+  f.busy = 'test'; f.error = ''; f.preview = null; render();
+  try{ const r = await azNS.testPlan({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); if(tpForm===f) f.preview = r; }
+  catch(e){ if(tpForm===f) f.error = azErrText(e); }
+  if(tpForm===f){ f.busy = false; render(); }
+}
+async function tpSave(){
+  const p = currentProject(); if(!p || !tpForm) return; const f = tpForm;
+  if(!f.plan.trim()){ f.error = 'Escribe el nombre o el ID del plan de pruebas.'; render(); return; }
+  f.busy = 'save'; f.error = ''; render();
+  let r;
+  try{ r = await azNS.testPlan({proyecto:f.proyecto.trim(), plan:f.plan.trim()}); }
+  catch(e){ if(tpForm===f){ f.busy = false; f.error = azErrText(e); render(); } return; }
+  const cfg = {proyecto:f.proyecto.trim(), plan:String(r.plan.id), planNombre:r.plan.name};
+  tpForm = null;
+  await patchProject(np => { np.azureTest = cfg; });
+  toast('Vínculo con Azure Test Plans guardado');
+  const np = projects.find(x => x.id===p.id); if(np) await azSync(np, true);
+}
+
 /* ---- Azure DevOps (solo lectura; el servidor guarda la llave y sincroniza) ---- */
 function azErrText(e){ return (e && e.message) || (e && e.code==='network' ? 'No se pudo conectar con el servidor.' : 'No se pudo consultar Azure DevOps.'); }
 async function azSync(p, force){
-  if(!azNS || !p || !p.azureCfg || azBusy.has(p.id)) return;
+  if(!azNS || !p || !(p.azureCfg || p.azureTest) || azBusy.has(p.id)) return;
   azBusy.add(p.id); delete azMsg[p.id]; softRender();
-  try{ const r = await azNS.sync(p.id, !!force); if(force) toast(r && r.skipped ? 'Los bugs ya estaban al día' : 'Bugs actualizados' + (r && r.total!=null ? ' (' + r.total + ')' : '')); }
+  try{ const r = await azNS.sync(p.id, !!force); if(force) toast(r && r.skipped ? 'Los datos ya estaban al día' : (p.azureCfg ? 'Bugs actualizados' + (r && r.total!=null ? ' (' + r.total + ')' : '') : 'Casos de prueba actualizados') + (r && r.tests && r.tests.error ? ' — pero el plan de pruebas dio error' : '')); }
   catch(e){ azMsg[p.id] = azErrText(e); }
   finally{ azBusy.delete(p.id); softRender(); }
 }
 function azMaybeSync(p){
-  if(!azNS || !p || !p.azureCfg || isClosed(p)) return;
-  const d = azBugs.get(p.id), t = d && d.syncedAt ? new Date(d.syncedAt).getTime() : 0;
-  if(!d || !t || d.error || Date.now() - t > 300000) azSync(p, false);
+  if(!azNS || !p || !(p.azureCfg || p.azureTest) || isClosed(p)) return;
+  const d = azBugs.get(p.id), old = (x, err) => !x || err || Date.now() - new Date(x).getTime() > 300000;
+  if(!d || (p.azureCfg && old(d.syncedAt, d.error)) || (p.azureTest && old(d.tests && d.tests.syncedAt, d.testsError))) azSync(p, false);
 }
 async function azTest(){
   const p = currentProject(); if(!p) return;
@@ -4334,6 +4393,11 @@ function onClick(e){
       if(currentView==='azure') ansDraft = null;
       render(); break;
     case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; azForm = null; figForm = null; figEdit = null; figDel = null; recForm = null; recUndo = false; seg = newSegForm(); render(); azMaybeSync(projects.find(x => x.id===el.dataset.id)); break;
+    case 'tp-edit': { const pr = currentProject(); if(pr){ tpForm = tpNew(pr); pruForm = null; render(); } break; }
+    case 'tp-cancel': tpForm = null; render(); break;
+    case 'tp-test': tpTest(); break;
+    case 'tp-save': tpSave(); break;
+    case 'tp-unlink': patchProject(np => { delete np.azureTest; }).then(() => toast('Vínculo con Azure Test Plans quitado: el avance vuelve a ser manual')); break;
     case 'az-fg': { const ap = currentProject(); if(ap){ azFilt[ap.id] = Object.assign({g:'todos', est:'', pri:''}, azFilt[ap.id], {g: el.dataset.v}); render(); } break; }
     case 'pru-edit': { const pr = currentProject(); if(pr){ const s0 = pr.pruebas || {}; pruForm = {pid:pr.id}; ['total','na','ok','fail','block','pause'].forEach(k => { pruForm[k] = s0[k]==null ? '' : String(s0[k]); }); render(); } break; }
     case 'pru-cancel': pruForm = null; render(); break;
@@ -4500,6 +4564,7 @@ function onInput(e){
     case 'resume': if(resumeForm) resumeForm.fecha = el.value; break;
     case 'ans': setAnsField(el); break;
     case 'az': azure[el.dataset.k] = el.value; updateWiql(); break;
+    case 'tpf': { if(tpForm){ tpForm[el.dataset.k] = el.value; tpForm.preview = null; tpForm.error = ''; } break; }
     case 'pru': { if(pruForm){ pruForm[el.dataset.k] = el.value; const lv = document.getElementById('pruLive'); if(lv) lv.innerHTML = pruLiveHtml(pruCalc(pruForm)); } break; }
     case 'azl': { const ap = currentProject(); if(!ap) break; if(!azForm || azForm.pid!==ap.id) azForm = azNew(ap); azForm[el.dataset.k] = el.value; azForm.preview = null; azForm.error = ''; break; }
     case 'newAnalyst': bit.newName = el.value; break;

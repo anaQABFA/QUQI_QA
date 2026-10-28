@@ -125,6 +125,7 @@
   /* ---------- Azure DevOps (solo lectura; la llave vive en el servidor) ---------- */
   const azureNS = {
     test: cfg => api('POST', '/api/azure/test', cfg || {}),
+    testPlan: cfg => api('POST', '/api/azure/test-plan', cfg || {}),
     sync: (id, force) => api('POST', '/api/azure/sync/' + encodeURIComponent(id), { force: !!force })
   };
 
