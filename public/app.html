@@ -366,6 +366,11 @@
   @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --alc-ink:#b9a2ff; --alc-bg:rgba(185,162,255,0.16); } }
   :root[data-theme="dark"]{ --alc-ink:#b9a2ff; --alc-bg:rgba(185,162,255,0.16); }
   .badge-alcance{ background:var(--alc-bg); color:var(--alc-ink); }
+  .figitem{ border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--surface); }
+  .figitem .figtop{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .figitem .figmeta{ font-size:12px; color:var(--text-secondary); margin-top:4px; }
+  .figitem .figcom{ margin-top:8px; font-size:13px; line-height:1.55; white-space:pre-wrap; }
+  .badge-orig{ background:var(--accent-soft, #e6f0ff); color:var(--accent-strong); }
   .az-chip{ display:inline-block; padding:2px 9px; border-radius:999px; border:1px solid var(--border); font-size:12px; margin:2px 4px 2px 0; }
   .az-chip b{ font-weight:700; }
   .az-link{ color:var(--accent-strong); font-weight:600; text-decoration:none; }
@@ -533,6 +538,8 @@ function normalizeProject(p){
   c.historias = (c.historias||[]).map(normalizeHU);
   c.bugs = Array.isArray(c.bugs) ? c.bugs : [];
   if(c.overallIndex && c.overallIndex.score!=null) c.overallIndex = idxFromScore(Number(c.overallIndex.score));
+  /* proyectos creados antes de existir la recepción: se consideran ya recibidos (su fecha de recepción = su inicio de pruebas) */
+  if(c.recepcion===undefined && !c.recibidoEn){ c.recepcion = 'recibido'; c.recibidoEn = toYmdLocal(c.testStart) || toYmdLocal(c.createdAt) || ''; c.recibidoAntes = true; }
   return c;
 }
 function critTotal(h){ return (h.criterios||[]).reduce((s,c) => s + (Number(c.pesoPct)||0), 0); }
@@ -804,7 +811,7 @@ function novedadRow(e, fz){
 function novedadesRows(entries){ const fz = freezeInfo(entries, ymd(new Date())); return novSorted(entries).map(e => novedadRow(e, fz)); }
 function novedadesResumen(p, entries){
   const today = ymd(new Date()), fz = freezeInfo(entries, today), ab = ambBlockInfo(entries), idx = p.overallIndex;
-  const rows = [['Proyecto', p.name], ['Creado', fmtDate(p.createdAt) + ' por ' + (p.createdBy||'—')],
+  const rows = [['Proyecto', p.name], ['Cargado', fmtDate(p.createdAt) + ' por ' + (p.createdBy||'—')], ['Recibido en QA', p.recibidoEn ? fmtDay(p.recibidoEn) + (p.recibidoPor ? ' por ' + p.recibidoPor : '') : '—'], ['Inicio de pruebas', p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—'], ['Fin planeado', planEnd(toYmdLocal(p.testStart), p.diasPlan) ? fmtDay(planEnd(toYmdLocal(p.testStart), p.diasPlan)) : '—'],
     ['Cierre', closedAt(p) ? fmtDate(closedAt(p)) + (p.certifiedBy ? ' por ' + p.certifiedBy : '') : '—'],
     ['% de entrega con el que se recibió', fmtPct(entregaRecibida(p))], ['% de certificación (bugs vs desarrollo)', (function(){ const q = certQuality(p, entries); return q.pct==null ? '—' : fmtPct(q.pct) + ' (' + q.bugs + ' bug' + (q.bugs===1?'':'s') + ' sobre ' + q.base + ' ' + q.basis + ')'; })()], ['Índice de calidad', idx ? idx.label : '—'], ['Cumplimiento ANS', p.ansPct!=null ? fmtPct(p.ansPct) : '—'],
     ['Total de novedades', entries.length]];
@@ -1263,27 +1270,60 @@ function toYmdLocal(v){
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const d = new Date(s); return isNaN(d) ? '' : ymd(d);
 }
-/* Contador de días hábiles de pruebas: desde el inicio de pruebas hasta hoy (o hasta el cierre),
-   sin contar los días hábiles en que el proyecto estuvo congelado por la prioridad de otro. */
+/* ---- Recepción en QA: cargado ≠ recibido ≠ inicio de pruebas ----
+   Un proyecto solo se recibe si: (1) está en el backlog de QA (requerimiento cargado),
+   (2) lleva al menos RECEP_MIN_PCT % de entrega (peso de HU × criterios recibidos),
+   (3) tiene estimación, fecha de inicio y plazo (con el que se calcula la fecha de fin). */
+const RECEP_MIN_PCT = 70;
+function isReceived(p){ return !!p && (p.recepcion==='recibido' || !!p.recibidoEn); }
+/* Fin planeado: el día de inicio cuenta como día 1 (si cae en día no hábil, el día 1 es el siguiente hábil). */
+function planEnd(startYmd, plan){
+  if(!startYmd || !(Number(plan) > 0)) return '';
+  let first = startYmd; if(!isBizDay(first)) first = addBizDays(first, 1);
+  return Number(plan) <= 1 ? first : addBizDays(first, Number(plan) - 1);
+}
+function fmtDay(s){ s = String(s||''); if(!s) return '—'; return /^\d{4}-\d{2}-\d{2}$/.test(s) ? fmtYmd(s, {day:'numeric', month:'short', year:'numeric'}) : fmtDate(s); }
+function recepcionCheck(p){
+  const pct = projectProgress(p), hus = (p.historias||[]).length;
+  const est = Number(p.estDias) > 0 ? Number(p.estDias) : 0, plan = Number(p.diasPlan) > 0 ? Number(p.diasPlan) : 0;
+  const start = toYmdLocal(p.testStart), fin = planEnd(start, plan);
+  const faltan = []; if(!est) faltan.push('estimación'); if(!start) faltan.push('fecha de inicio'); if(!plan) faltan.push('plazo (para calcular la fecha de fin)');
+  const items = [
+    {k:'backlog', ok:hus>0, label:'Está en el backlog de QA (requerimiento cargado)', detail: hus ? hus + ' HU cargada' + (hus===1?'':'s') : 'No hay HU cargadas'},
+    {k:'entrega', ok:pct >= RECEP_MIN_PCT, label:'Completa el ' + RECEP_MIN_PCT + '% de entrega (suma de HU y criterios)', detail:'Lleva ' + fmtPct(pct)},
+    {k:'plan', ok:!faltan.length, label:'Tiene estimación, fecha de inicio y fecha de fin', detail: faltan.length ? 'Falta: ' + faltan.join(', ') : 'Estimación ' + est + ' día' + (est===1?'':'s') + ' · inicio ' + fmtDay(start) + ' · fin ' + fmtDay(fin)}
+  ];
+  return { ok: items.every(x => x.ok), items, pct, est, plan, start, fin };
+}
+/* Contador de días hábiles de pruebas: desde el inicio de pruebas (la fecha que define el equipo) hasta hoy (o hasta el cierre),
+   solo si el proyecto ya fue recibido en QA, sin contar los días hábiles en que estuvo congelado por la prioridad de otro. */
 function testClock(p, entries, todayStr){
   const plan = Number(p.diasPlan) > 0 ? Number(p.diasPlan) : null;
-  const start = toYmdLocal(p.testStart) || toYmdLocal(p.createdAt) || todayStr;
-  const closed = isClosed(p);
+  const received = isReceived(p), closed = isClosed(p);
+  const startRaw = toYmdLocal(p.testStart) || (received ? toYmdLocal(p.createdAt) : '');
+  const start = startRaw || todayStr;
+  const notStarted = !closed && (!received || !startRaw || todayStr < startRaw);
   let end = closed ? (toYmdLocal(closedAt(p)) || todayStr) : todayStr;
   if(end < start) end = start;
-  const elapsed = bizDaysBetween(start, end, true);
-  const fz = freezeInfo(entries || [], end);
+  const elapsed = notStarted ? 0 : bizDaysBetween(start, end, true);
+  const fz = notStarted ? {days:0, frozen:false} : freezeInfo(entries || [], end);
   const frozenDays = Math.min(elapsed, fz.days);
   const used = Math.max(0, elapsed - frozenDays);
   const remaining = plan==null ? null : plan - used;
   let level = 'none';
-  if(plan!=null) level = used > plan ? 'over' : (remaining <= Math.max(1, Math.floor(plan*0.2)) ? 'warn' : 'ok');
-  const deadline = (!closed && plan!=null && remaining>0 && !fz.frozen) ? addBizDays(end, remaining) : null;
-  return { start, end, closed, plan, used, elapsed, frozenDays, frozen: fz.frozen, remaining, level,
+  if(plan!=null && !notStarted) level = used > plan ? 'over' : (remaining <= Math.max(1, Math.floor(plan*0.2)) ? 'warn' : 'ok');
+  const fin = planEnd(startRaw, plan);
+  const deadline = notStarted ? (received && fin ? fin : null) : ((!closed && plan!=null && remaining>0 && !fz.frozen) ? addBizDays(end, remaining) : null);
+  return { start, startRaw, end, closed, received, notStarted, plan, used, elapsed, frozenDays, frozen: fz.frozen, remaining, level, fin,
            pct: plan ? clamp(used / plan * 100, 0, 100) : null, over: plan!=null && used>plan ? used-plan : 0,
            est: Number(p.estDias) > 0 ? Number(p.estDias) : null, deadline };
 }
 function clockSummary(c){
+  if(!c.received && !c.closed) return 'En backlog QA · pendiente de recibir';
+  if(c.notStarted){
+    if(!c.startRaw) return 'Recibido · falta definir la fecha de inicio de pruebas';
+    return 'Recibido · las pruebas inician el ' + fmtYmd(c.startRaw, {day:'numeric', month:'short'}) + (c.plan ? ' · ' + c.plan + ' día' + (c.plan===1?'':'s') + ' hábil' + (c.plan===1?'':'es') + (c.fin ? ' · fin ' + fmtYmd(c.fin, {day:'numeric', month:'short'}) : '') : '');
+  }
   if(c.plan==null) return 'Día ' + c.used + ' de pruebas' + (c.est ? ' · estimado ' + c.est : '');
   if(c.closed) return 'Pruebas en ' + c.used + ' de ' + c.plan + ' día' + (c.plan===1?'':'s') + ' hábil' + (c.plan===1?'':'es') + (c.over ? ' (+' + c.over + ' sobre lo planeado)' : (c.remaining>0 ? ' (' + c.remaining + ' antes de lo planeado)' : ''));
   if(c.over) return 'Día ' + c.used + ' de ' + c.plan + ' · ' + c.over + ' día' + (c.over===1?'':'s') + ' hábil' + (c.over===1?'':'es') + ' de retraso';
@@ -1521,7 +1561,7 @@ let selectedProjectId = null;
 let mode = null;          // null | 'edit' | 'cert'  (en el detalle de un proyecto)
 let work = null;          // copia de trabajo de historias al editar pesos
 let certDraft = null;     // { historias, bugs, fileName, pasted, status, summary }
-const newDraft = () => ({ name:'', file:null, fileName:'', historias:[], analyzing:false, error:null, diasPlan:null, diasTouched:false, estAI:null, estLoading:false, estError:null });
+const newDraft = () => ({ testStart:'', figma:[], figUrl:'', figTitulo:'', figError:'', name:'', file:null, fileName:'', historias:[], analyzing:false, error:null, diasPlan:null, diasTouched:false, estAI:null, estLoading:false, estError:null });
 let draft = newDraft();
 let qaEdit = null;   // edición del plazo de pruebas en el detalle del proyecto
 const openDetails = new Set();
@@ -1530,6 +1570,10 @@ const cdraft = {};      // borradores del módulo de comentarios por HU: {hu: {c
 let bit = { analystId:null, date:ymd(new Date()), view:'dia', month:ymOf(new Date()), bugForm:null, saveState:'', newName:'' };
 let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinculo:'child' };
 /* Conexión en vivo con Azure DevOps (solo en la versión web con llave configurada en el servidor) */
+/* Diseño (Figma): formulario del proyecto abierto, edición de comentario y borrado en dos pasos */
+let figForm = null, figEdit = null, figDel = null;
+/* Recepción en QA: formulario de fecha y confirmación de deshacer */
+let recForm = null, recUndo = false;
 let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
@@ -1707,6 +1751,21 @@ async function pdfPagesToImages(pdf, max){
   }
   return out;
 }
+/* Texto de una página de PDF conservando los renglones (así se distinguen los encabezados de HU). */
+function pdfPageLines(items){
+  const lines = []; let line = '', lastY = null;
+  const push = () => { const t = line.replace(/\s+/g,' ').trim(); if(t) lines.push(t); line = ''; lastY = null; };
+  items.forEach(it => {
+    const y = it.transform ? Math.round(it.transform[5]) : null;
+    if(it.str){
+      if(lastY!=null && y!=null && Math.abs(y-lastY) > 3) push();
+      line += (line ? ' ' : '') + it.str; if(y!=null) lastY = y;
+    }
+    if(it.hasEOL) push();
+  });
+  push();
+  return lines.join('\n');
+}
 /* Lee cualquier archivo razonable: devuelve texto y/o imágenes para que la IA los analice. */
 async function readForAI(file){
   const ext = extOf(file), type = file.type || '';
@@ -1714,9 +1773,9 @@ async function readForAI(file){
   if(ext==='pdf' || type==='application/pdf'){
     ensurePdfWorker();
     const pdf = await window.pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
-    for(let i=1;i<=Math.min(pdf.numPages,25);i++){
+    for(let i=1;i<=Math.min(pdf.numPages,300);i++){
       const content = await (await pdf.getPage(i)).getTextContent();
-      text += content.items.map(it => it.str).join(' ') + '\n';
+      text += pdfPageLines(content.items) + '\n';
     }
     if(text.replace(/\s/g,'').length < 80) images = await pdfPagesToImages(pdf, 5);   // PDF escaneado
   }
@@ -1765,6 +1824,57 @@ async function rowsFromFile(file){
   });
   return best;
 }
+/* ---- Lectura directa (sin IA) de documentos con encabezados "HU 12 — Título" y sus criterios de aceptación ---- */
+const HU_HEAD_RE = /^\s*(?:HU|Historia(?:\s+de\s+usuario)?)\s*[-\u2011 ]?\s*(\d{1,3})\s*[\u2014\u2013:\-]\s*(\S.*)$/i;
+const HU_NOISE_RE = /(^\s*FLUXOR\b)|(P[aá]gina\s+\d+\s+de\s+\d+)|(^\s*Documento de uso interno)|(^\s*Radicado\s+\d+\s*$)/i;
+const HU_STOP_RE = /^\s*(Tareas sugeridas|Tareas\b|[ÁA]reas responsables|Estimado\s*:|Dependencias\b|Notas?\s*:|Riesgos|Resumen de esfuerzo|Recomendaciones|Orden de implementaci|Descripci[oó]n\s*:)/i;
+const HU_CRIT_HEAD_RE = /^\s*Criterios? de aceptaci[oó]n\s*:?\s*$/i;
+function parseHUText(text){
+  const lines = String(text||'').split('\n').map(l => l.replace(/\s+$/,'')).filter(l => !HU_NOISE_RE.test(l));
+  const heads = [];
+  for(let i=0;i<lines.length;i++){
+    const m = HU_HEAD_RE.exec(lines[i]); if(!m) continue;
+    // es un encabezado real solo si enseguida vienen "Yo como…", "Descripción" o "Criterios de aceptación"
+    const near = lines.slice(i+1, i+14).join('\n');
+    if(!/(^|\n)\s*(Yo como|Como (un|una|el|la)\b|Descripci[oó]n|Criterios? de aceptaci)/i.test(near)) continue;
+    heads.push({ i, num:Number(m[1]), title:m[2].trim() });
+  }
+  const out = [], dups = [];
+  heads.forEach((h,k) => {
+    const end = k+1<heads.length ? heads[k+1].i : lines.length;
+    let body = lines.slice(h.i+1, end);
+    // título partido en dos renglones
+    if(body.length && body[0].trim() && body[0].trim().length<110 && !/^\s*(Yo como|Como |Descripci|Criterio|Quiero|Para )/i.test(body[0]) && !/[.:?]$/.test(h.title)){ h.title += ' ' + body[0].trim(); body = body.slice(1); }
+    const crit = []; let inCrit = false, cur = null;
+    const flush = () => { if(cur){ const t = cur.replace(/\s+/g,' ').trim(); if(t) crit.push(t.slice(0,500)); cur = null; } };
+    for(const ln of body){
+      if(HU_CRIT_HEAD_RE.test(ln)){ flush(); inCrit = true; continue; }
+      if(!inCrit){
+        const mm = /^\s*Criterio\s+\d+\s*(\([^)]*\))?\s*:\s*(.*)$/i.exec(ln);
+        if(mm) inCrit = true; else continue;
+      }
+      if(HU_STOP_RE.test(ln) && !/^\s*Criterio\b/i.test(ln)){ flush(); inCrit = false; continue; }
+      let m;
+      if((m = /^\s*Criterio\s+\d+\s*(?:\([^)]*\))?\s*:\s*(.*)$/i.exec(ln))){ flush(); cur = m[1]; }
+      else if((m = /^\s*(?:CA[\s-]?)?\d{1,3}[.)]\s+(.*)$/i.exec(ln))){ flush(); cur = m[1]; }
+      else if((m = /^\s*[\u2022\u25CF\u25AA\-*]\s+(.*)$/.exec(ln)) && !cur){ cur = m[1]; }
+      else if(cur != null && ln.trim()) cur += ' ' + ln.trim();
+    }
+    flush();
+    const code = 'HU-' + pad2(h.num);
+    const item = { codigo:code, descripcion:h.title.replace(/\s+/g,' ').slice(0,200), criterios:crit, pesoPct:null };
+    const prev = out.find(x => x.codigo===code);
+    if(prev){ dups.push(code); if(crit.length > prev.criterios.length){ prev.criterios = crit; prev.descripcion = item.descripcion; } }
+    else out.push(item);
+  });
+  return { historias: out, criterios: out.reduce((t,h) => t + h.criterios.length, 0), dups, sinCriterios: out.filter(h => !h.criterios.length).map(h => h.codigo) };
+}
+/* Cuántos encabezados de HU trae el texto (para avisar si la lectura se quedó corta). */
+function countHUHeadings(text){
+  const seen = new Set(), ls = String(text||'').split('\n');
+  ls.forEach((l,i) => { const m = HU_HEAD_RE.exec(l); if(m && /(^|\n)\s*(Yo como|Como (un|una|el|la)\b|Descripci[oó]n|Criterios? de aceptaci)/i.test(ls.slice(i+1,i+14).join('\n'))) seen.add(Number(m[1])); });
+  return seen.size;
+}
 /* Parte un texto largo en bloques por líneas completas (para no perder HU al final del documento). */
 function chunkText(t, max){
   const out = []; let cur = '';
@@ -1812,11 +1922,21 @@ async function analyzeRequirement(){
           (r.dups.length ? ' Hay códigos repetidos (' + Array.from(new Set(r.dups)).join(', ') + '): se numeraron con (2), (3)… — revísalos.' : '');
       }
     }
+    // 1b) Documentos de texto con encabezados "HU N — título" y criterios: lectura directa, sin IA y sin límite de tamaño.
+    if(!raw && src.text){
+      const r = parseHUText(src.text);
+      if(r.historias.length >= 2 && r.sinCriterios.length <= Math.floor(r.historias.length/4)){
+        raw = r.historias;
+        note = 'Se leyeron ' + r.historias.length + ' HU y ' + r.criterios + ' criterios directamente del documento (sin IA).' +
+          (r.sinCriterios.length ? ' Sin criterios detectados: ' + r.sinCriterios.join(', ') + ' — revísalas.' : '') +
+          (r.dups.length ? ' Códigos repetidos en el documento: ' + Array.from(new Set(r.dups)).join(', ') + ' (se conservó la versión con más criterios).' : '');
+      }
+    }
     // 2) Si no, la IA lee el documento por bloques para que nada quede fuera por tamaño.
     if(!raw){
       if(!sampleAvailable) throw {code:'sampling_disabled'};
       const opts = await aiOpts(src.images);
-      const MAXCH = 8;
+      const MAXCH = 24;
       const all = chunkText(src.text, 12000);
       const chunks = all.slice(0, MAXCH);
       raw = [];
@@ -1843,8 +1963,10 @@ ${chunks[i]}
           else raw.push({ codigo: code || ('HU-' + pad2(raw.length+1)), descripcion:String(h.descripcion||'').slice(0,400), criterios:crit, pesoPct:toNumOrNull(h.pesoPct) });
         });
       }
+      const headN = countHUHeadings(src.text);
       if(all.length > MAXCH) note = 'El documento es muy extenso: se analizaron las primeras ' + MAXCH + ' partes. Revisa que estén todas las HU.';
       else if(raw.length) note = 'La IA detectó ' + raw.length + ' HU y ' + raw.reduce((t,h) => t + h.criterios.length, 0) + ' criterios. Revisa que estén completas.';
+      if(headN > raw.length) note += ' Ojo: el documento trae ' + headN + ' encabezados de HU y la IA devolvió ' + raw.length + '. Agrega las que falten.';
     }
     const hs = raw.map((h,i) => normalizeHU({
       codigo: h.codigo || ('HU-' + pad2(i+1)), descripcion: h.descripcion || '',
@@ -1964,6 +2086,9 @@ function badgeStatus(p){
     return `<span class="badge badge-certificado"><span class="dot"></span>Certificado${oi}</span>`;
   }
   if(p.cerradoEn) return `<span class="badge badge-certificado"><span class="dot"></span>Cerrado · Certificado QA</span>`;
+  if(!isReceived(p)) return `<span class="badge badge-pendiente"><span class="dot"></span>En backlog QA</span>`;
+  const sd = toYmdLocal(p.testStart);
+  if(sd && sd > ymd(new Date())) return `<span class="badge badge-parcial"><span class="dot"></span>Recibido · inicia ${fmtYmd(sd, {day:'numeric', month:'short'})}</span>`;
   return `<span class="badge badge-activo"><span class="dot"></span>En seguimiento</span>`;
 }
 function indexBadge(idx){ return idx ? `<span class="badge ${idx.cls}"><span class="dot"></span>${idx.label}</span>` : '—'; }
@@ -2035,10 +2160,42 @@ function stopPanel(){
 }
 
 function clockBadge(c, short){
+  if(!c.received && !c.closed) return '';
+  if(c.notStarted) return c.startRaw ? `<span class="badge clk-ok" title="${escapeHtml(clockSummary(c))}"><span class="dot"></span>⏳ Inicia ${fmtYmd(c.startRaw, {day:'numeric', month:'short'})}</span>` : '';
   if(c.plan==null && !c.used) return '';
   const cls = c.level==='over' ? 'clk-over' : c.level==='warn' ? 'clk-warn' : 'clk-ok';
   const txt = c.plan==null ? '⏱ Día ' + c.used : (c.closed ? '⏱ ' + c.used + '/' + c.plan + ' días' : '⏱ Día ' + c.used + '/' + c.plan);
   return `<span class="badge ${cls}" title="${escapeHtml(clockSummary(c))}"><span class="dot"></span>${txt}${c.level==='over' && !c.closed ? ' · +' + c.over : ''}</span>`;
+}
+function qaFinText(inicio, dias){
+  const d = Number(dias);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(inicio||'') || !(d>0)) return 'Fin planeado: define la fecha de inicio y los días hábiles para calcularlo.';
+  return 'Fin planeado: <strong>' + fmtDay(planEnd(inicio, d)) + '</strong> (el día de inicio cuenta como día 1).';
+}
+function recepcionPanel(p){
+  const c = recepcionCheck(p), recv = isReceived(p), closed = isClosed(p);
+  const stat = (v, l) => `<div class="clkstat"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  const fin = planEnd(toYmdLocal(p.testStart), p.diasPlan);
+  const dates = `<div class="clkstats">${stat(fmtDay(p.createdAt), 'cargado en QUQI_QA')}${stat(recv ? fmtDay(p.recibidoEn) : '—', 'recibido en QA')}${stat(p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—', 'inicio de pruebas')}${stat(fin ? fmtDay(fin) : '—', 'fin planeado')}</div>`;
+  if(recv){
+    const edit = recForm && recForm.edit && !closed;
+    const form = edit ? `<div class="resumebox"><label class="field-label" for="recFechaIn">Fecha de recepción</label><input type="date" id="recFechaIn" data-f="recFecha" value="${escapeHtml(recForm.fecha)}" max="${ymd(new Date())}" min="${toYmdLocal(p.createdAt)}" style="max-width:200px;" />
+      <div class="flexrow" style="margin-top:10px;"><button class="btn btn-sm btn-primary" data-act="rec-save" type="button">Guardar fecha</button><button class="btn btn-sm btn-ghost" data-act="rec-cancel" type="button">Cancelar</button></div></div>` : '';
+    const acts = closed || edit ? '' : (recUndo
+      ? `<div class="delbox" data-act="noop"><span>¿Deshacer la recepción? El proyecto vuelve al backlog de QA y el reloj de pruebas se detiene.</span><button class="btn btn-sm btn-danger" data-act="rec-undo-ok" type="button">Sí, deshacer</button><button class="btn btn-sm btn-ghost" data-act="rec-undo-cancel" type="button">No</button></div>`
+      : `<div class="flexend" style="margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="rec-edit" type="button">Cambiar fecha de recepción</button><button class="btn btn-sm btn-ghost" data-act="rec-undo-ask" type="button">Deshacer recepción</button></div>`);
+    return `<div class="panel"><div class="panel-head"><div><h2>Recepción en QA</h2><p class="hint">${p.recibidoAntes ? 'Proyecto anterior a la recepción formal: se considera recibido desde su inicio de pruebas.' : 'Recibido en QA' + (p.recibidoPor ? ' por ' + escapeHtml(p.recibidoPor) : '') + '. Cargar, recibir e iniciar pruebas son fechas distintas.'}</p></div>
+      <span class="badge badge-recibida"><span class="dot"></span>Recibido</span></div>${dates}${form}${acts}</div>`;
+  }
+  if(closed) return '';
+  const rows = c.items.map(it => `<div class="small" style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;"><span style="color:${it.ok ? 'var(--good)' : 'var(--critical)'};font-weight:700;">${it.ok ? '✓' : '✗'}</span><span><strong>${escapeHtml(it.label)}</strong><br>${escapeHtml(it.detail)}</span></div>`).join('');
+  const f = recForm || {fecha: ymd(new Date())};
+  return `<div class="panel"><div class="panel-head"><div><h2>Recepción en QA</h2><p class="hint">El proyecto está en el <strong>backlog de QA</strong>. Solo se recibe si cumple las tres condiciones. Las pruebas empiezan en la fecha de inicio que definas, no el día de la recepción.</p></div>
+      <span class="badge badge-pendiente"><span class="dot"></span>En backlog QA</span></div>
+    ${dates}<div style="margin-top:10px;">${rows}</div>
+    <div class="rowgrid" style="margin-top:8px;align-items:end;"><div><label class="field-label" for="recFechaIn">Fecha de recepción</label><input type="date" id="recFechaIn" data-f="recFecha" value="${escapeHtml(f.fecha)}" max="${ymd(new Date())}" min="${toYmdLocal(p.createdAt)}" style="max-width:200px;" /></div>
+      <div class="flexend" style="margin:0;"><button class="btn btn-primary" data-act="rec-save" type="button" ${c.ok ? '' : 'disabled'}>Recibir en QA</button></div></div>
+    ${c.ok ? '' : '<div class="small" style="margin-top:6px;">Completa lo que falta: la entrega sube al marcar criterios como recibidos; la estimación, el inicio y el plazo se definen en «Tiempo de pruebas QA».</div>'}</div>`;
 }
 function qaClockPanel(p){
   const entries = segs.filter(e => e.projectId===p.id), c = testClock(p, entries, ymd(new Date()));
@@ -2046,14 +2203,15 @@ function qaClockPanel(p){
   const color = c.level==='over' ? 'var(--critical)' : c.level==='warn' ? 'var(--warn-ink)' : 'var(--good)';
   const stat = (v, l) => `<div class="clkstat"><div class="v">${v}</div><div class="l">${l}</div></div>`;
   const stats = stat(c.used, 'días hábiles usados') + stat(c.plan==null ? '—' : c.plan, 'planeados') + stat(c.est || '—', 'estimación inicial') +
-    stat(c.frozenDays, 'congelados (no cuentan)') + stat(fmtYmd(c.start, {day:'numeric', month:'short'}), 'inicio de pruebas') +
+    stat(c.frozenDays, 'congelados (no cuentan)') + stat(c.startRaw ? fmtYmd(c.startRaw, {day:'numeric', month:'short'}) : '—', 'inicio de pruebas') +
     (c.closed ? stat(fmtYmd(c.end, {day:'numeric', month:'short'}), 'cierre') : stat(c.deadline ? fmtYmd(c.deadline, {day:'numeric', month:'short'}) : (c.frozen ? '❄ congelado' : '—'), 'fecha límite'));
   const bar = c.plan==null ? '' : `<div class="clockbar"><div style="width:${c.pct}%;background:${color}"></div></div>`;
   const form = edit ? `<div class="resumebox"><div class="rowgrid"><div><label class="field-label" for="qaDiasIn">Días hábiles a probar</label><input type="number" id="qaDiasIn" data-f="qaDias" min="1" max="400" step="1" value="${escapeHtml(qaEdit.dias)}" style="max-width:160px;" /></div>
-      <div><label class="field-label" for="qaInicioIn">Inicio de pruebas</label><input type="date" id="qaInicioIn" data-f="qaInicio" value="${escapeHtml(qaEdit.inicio)}" max="${ymd(new Date())}" /></div></div>
+      <div><label class="field-label" for="qaInicioIn">Inicio de pruebas (la fecha que defines)</label><input type="date" id="qaInicioIn" data-f="qaInicio" value="${escapeHtml(qaEdit.inicio)}" /></div></div>
+      <div class="small" id="qaFinTxt" style="margin-top:8px;">${qaFinText(qaEdit.inicio, qaEdit.dias)}</div>
       <div class="flexrow" style="margin-top:10px;"><button class="btn btn-sm btn-primary" data-act="qa-save" type="button">Guardar</button><button class="btn btn-sm btn-ghost" data-act="qa-cancel" type="button">Cancelar</button></div></div>` : '';
   return `<div class="panel"><div class="panel-head"><div><h2>Tiempo de pruebas QA</h2><p class="hint" style="color:${c.plan==null ? 'inherit' : color}">${escapeHtml(clockSummary(c))}</p></div>
-    ${c.closed || edit ? '' : `<button class="btn btn-sm" data-act="qa-edit" type="button">${c.plan==null ? 'Definir días a probar' : 'Editar plazo'}</button>`}</div>
+    ${c.closed || edit ? '' : `<button class="btn btn-sm" data-act="qa-edit" type="button">${c.plan==null || !c.startRaw ? 'Definir plazo e inicio' : 'Editar plazo'}</button>`}</div>
     ${bar}<div class="clkstats">${stats}</div>${p.estRazon ? `<div class="small" style="margin-top:8px;">Estimación inicial: ${escapeHtml(p.estRazon)}</div>` : ''}${form}</div>`;
 }
 function projectListRows(list, withDelete){
@@ -2061,7 +2219,7 @@ function projectListRows(list, withDelete){
     const pct = projectProgress(p), so = stopperOpenCount(p.id), fzc = freezeInfo(segs.filter(e => e.projectId===p.id), ymd(new Date()));
     return `<div class="projectcard" data-act="open-project" data-id="${escapeHtml(p.id)}" role="button" tabindex="0">
       <div class="top"><div><h3>${escapeHtml(p.name)}</h3>
-      <div class="meta">${(p.historias||[]).length} HU · creado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')} ${badgeStatus(p)} ${fzc.frozen ? `<span class="badge badge-parcial"><span class="dot"></span>❄ Congelado · ${escapeHtml(fzc.current.prio||'otra prioridad')}</span>` : ''} ${so ? `<span class="badge ans-incumple"><span class="dot"></span>${so} stopper abierto${so>1?'s':''}</span>` : ''} ${clockBadge(testClock(p, segs.filter(e => e.projectId===p.id), ymd(new Date())))}</div></div>
+      <div class="meta">${(p.historias||[]).length} HU · cargado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')}${p.recibidoEn && !p.recibidoAntes ? ' · recibido ' + fmtDay(p.recibidoEn) : ''} ${badgeStatus(p)} ${fzc.frozen ? `<span class="badge badge-parcial"><span class="dot"></span>❄ Congelado · ${escapeHtml(fzc.current.prio||'otra prioridad')}</span>` : ''} ${so ? `<span class="badge ans-incumple"><span class="dot"></span>${so} stopper abierto${so>1?'s':''}</span>` : ''} ${clockBadge(testClock(p, segs.filter(e => e.projectId===p.id), ymd(new Date())))}</div></div>
       <div class="pct">${fmtPct(pct)}</div></div>
       <div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
       ${withDelete ? `<div class="flexend" style="margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar</button></div>${delBox(p.id)}` : ''}</div>`;
@@ -2232,8 +2390,10 @@ function viewProjectDetail(){
     <div style="text-align:right"><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div></div></div>
     <div class="progress ${done?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
+  body += recepcionPanel(p);
   body += qaClockPanel(p);
   body += azurePanel(p);
+  body += figmaPanel(p);
   body += `<div class="panel"><div class="panel-head"><div><h2>Historias de usuario</h2>
     <p class="hint">${editing ? 'Ajusta el peso de cada HU y el de cada criterio dentro de su HU. Cada nivel debe sumar 100%.' : 'Abre “Criterios de aceptación” en cada HU y marca los criterios a medida que llegan a QA; el % del proyecto sube según su peso.'}</p></div>
     <div class="flexrow">${editing
@@ -2307,6 +2467,67 @@ function azCertBox(p){
   const doc = azDoc(p); if(!azNS || !doc || !(doc.bugs||[]).length) return '';
   return `<div class="banner banner-info" style="margin-bottom:12px;"><span>🔗</span><span>Azure DevOps tiene <strong>${doc.bugs.length} bug(s)</strong> vinculados a este proyecto (sincronizado ${azAgo(doc.syncedAt)}). <button class="btn btn-sm btn-primary" data-act="cert-use-azure" type="button" style="margin-left:6px;">Usar bugs de Azure (${doc.bugs.length})</button></span></div>`;
 }
+/* ================= Diseño (Figma) ================= */
+function figUrlProblem(u){
+  u = String(u||'').trim(); if(!u) return 'Pega el enlace del diseño.';
+  let x; try{ x = new URL(u); }catch(e){ return 'El enlace no es válido. Cópialo completo, empezando por https://'; }
+  if(x.protocol!=='https:' && x.protocol!=='http:') return 'El enlace debe empezar por https://';
+  return '';
+}
+function figSize(n){ n = Number(n)||0; return n>=1048576 ? (n/1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n/1024)) + ' KB'; }
+function figLabel(e){
+  if(e.titulo) return e.titulo;
+  if(e.tipo==='archivo') return e.nombre || 'Archivo';
+  try{ const x = new URL(e.url); const node = x.searchParams.get('node-id'); return x.hostname.replace(/^www\./,'') + (node ? ' · nodo ' + node : ''); }catch(err){ return e.url; }
+}
+function figItemHtml(e, n, ctx){
+  const badge = e.original ? '<span class="badge badge-orig"><span class="dot"></span>Original</span>' : `<span class="badge badge-alcance"><span class="dot"></span>Actualización ${n}</span>`;
+  const icon = e.tipo==='archivo' ? '📎' : '🔗';
+  const safe = e.tipo==='url' && /^https?:\/\//i.test(e.url||'') ? e.url : '';
+  const link = safe ? ` <a class="az-link" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">Abrir en Figma ↗</a>` : '';
+  const meta = e.tipo==='archivo' ? `${escapeHtml(e.nombre||'')} · ${figSize(e.tamano)} · <em>el archivo no se guarda en la app</em>` : escapeHtml(e.url||'');
+  const editing = ctx==='proj' && figEdit && figEdit.id===e.id;
+  const com = editing
+    ? `<textarea rows="3" data-f="figEdit" style="margin-top:8px;width:100%;" placeholder="¿Qué cambió frente al original?">${escapeHtml(figEdit.comentario)}</textarea><div class="flexend" style="margin-top:6px;"><button class="btn btn-sm btn-ghost" data-act="fig-edit-cancel" type="button">Cancelar</button><button class="btn btn-sm btn-primary" data-act="fig-edit-save" type="button">Guardar comentario</button></div>`
+    : (e.comentario ? `<div class="figcom">${escapeHtml(e.comentario)}</div>` : (e.original ? '' : '<div class="figmeta">Sin comentario de cambios.</div>'));
+  const acts = ctx==='proj'
+    ? (figDel===e.id
+        ? `<span class="small" style="color:var(--critical)">¿Quitar esta carga del historial?</span><button class="btn btn-sm btn-danger" data-act="fig-del-ok" data-id="${escapeHtml(e.id)}" type="button">Sí, quitar</button><button class="btn btn-sm btn-ghost" data-act="fig-del-cancel" type="button">No</button>`
+        : `${editing ? '' : `<button class="btn btn-sm btn-ghost" data-act="fig-edit" data-id="${escapeHtml(e.id)}" type="button">Comentar / editar</button>`}<button class="btn btn-sm btn-ghost" data-act="fig-del" data-id="${escapeHtml(e.id)}" type="button">Quitar</button>`)
+    : `<button class="btn btn-sm btn-ghost" data-act="fig-del-draft" data-id="${escapeHtml(e.id)}" type="button">Quitar</button>`;
+  return `<div class="figitem"><div class="figtop">${badge}<strong>${icon} ${escapeHtml(figLabel(e))}</strong>${link}<span style="margin-left:auto" class="flexrow">${acts}</span></div>
+    <div class="figmeta">${meta}${e.autor ? ' · ' + escapeHtml(e.autor) : ''}${e.fecha ? ' · ' + fmtDateTime(e.fecha) : ''}</div>${com}</div>`;
+}
+function figListHtml(items, ctx){
+  if(!items.length) return `<div class="empty">Aún no hay diseño registrado${ctx==='proj' ? '. Agrega el enlace de Figma o los archivos del diseño original.' : '.'}</div>`;
+  let n = 0;
+  return items.map(e => figItemHtml(e, e.original ? 0 : ++n, ctx)).join('');
+}
+function figmaPanelDraft(){
+  return `<div class="panel"><div class="panel-head"><div><h2>Diseño (Figma)</h2><p class="hint">Opcional. Registra el enlace de Figma o los archivos del diseño (PDF, HTML, imagen…) que acompañan al requerimiento: será la versión <strong>original</strong> del diseño. Más adelante, si el alcance cambia, podrás cargar actualizaciones con su comentario.</p></div></div>
+    <div class="rowgrid"><div><label class="field-label" for="figUrlInput">Enlace de Figma</label><input type="url" id="figUrlInput" data-f="figUrl" value="${escapeHtml(draft.figUrl)}" placeholder="https://www.figma.com/design/…" autocomplete="off" /></div>
+      <div><label class="field-label" for="figTituloInput">Nombre (opcional)</label><input type="text" id="figTituloInput" data-f="figTitulo" value="${escapeHtml(draft.figTitulo)}" placeholder="Ej. Autogestión — Actualización de datos" autocomplete="off" /></div></div>
+    <div class="flexrow" style="margin:10px 0;"><button class="btn btn-sm btn-primary" data-act="fig-add-draft" type="button">Agregar enlace</button><button class="btn btn-sm" data-act="fig-pick-draft" type="button">📎 Subir archivo(s) del diseño</button><input type="file" id="figFileDraft" multiple hidden />
+      ${draft.figError ? `<span class="small" style="color:var(--critical)">${escapeHtml(draft.figError)}</span>` : ''}</div>
+    ${(draft.figma||[]).length ? figListHtml(draft.figma, 'draft') : ''}</div>`;
+}
+function figmaPanel(p){
+  const items = (p.figma || []);
+  const f = figForm && figForm.pid===p.id ? figForm : null;
+  const first = !items.length;
+  return `<div class="panel"><div class="panel-head"><div><h2>Diseño (Figma)</h2><p class="hint">Historial del diseño del proyecto: la versión original y cada actualización cuando el alcance cambia. Comenta qué cambió frente al original.</p></div></div>
+    ${figListHtml(items, 'proj')}
+    <details class="crit" data-key="figadd" ${openDetails.has('figadd') || first ? 'open' : ''}><summary>${first ? 'Registrar el diseño original' : 'Cargar una actualización del diseño'}</summary>
+      <div class="rowgrid" style="margin-top:10px;"><div><label class="field-label">Enlace de Figma</label><input type="url" data-f="figf" data-k="url" value="${escapeHtml(f ? f.url : '')}" placeholder="https://www.figma.com/design/…" autocomplete="off" /></div>
+        <div><label class="field-label">Nombre (opcional)</label><input type="text" data-f="figf" data-k="titulo" value="${escapeHtml(f ? f.titulo : '')}" placeholder="Ej. v2 — nuevas pantallas de OTP" autocomplete="off" /></div></div>
+      <div style="margin-top:10px;"><label class="field-label">…o archivo(s) del diseño (PDF, HTML, imagen, otro)</label>
+        <div class="flexrow"><button class="btn btn-sm" data-act="fig-pick-proj" type="button">📎 Elegir archivo(s)</button><input type="file" id="figFileProj" multiple hidden />
+          ${f && f.files.length ? f.files.map((x,i) => `<span class="filepill">📎 ${escapeHtml(x.name)} (${figSize(x.size)}) <button class="btn btn-sm btn-ghost" data-act="fig-file-rm" data-i="${i}" type="button" aria-label="Quitar ${escapeHtml(x.name)}">✕</button></span>`).join('') : '<span class="small">Los archivos no se guardan: solo queda registrado su nombre y la fecha de carga.</span>'}</div></div>
+      <div style="margin-top:10px;"><label class="field-label">${first ? 'Comentario (opcional)' : '¿Qué cambió frente al original?'}</label><textarea rows="3" data-f="figf" data-k="comentario" placeholder="${first ? 'Ej. Diseño aprobado por el PO el 15/10' : 'Ej. Se agrega pantalla de confirmación de llaves Bre-B (HU-27); cambia el flujo de OTP'}">${escapeHtml(f ? f.comentario : '')}</textarea></div>
+      ${f && f.error ? `<div class="small" style="color:var(--critical);margin-top:6px;">${escapeHtml(f.error)}</div>` : ''}
+      <div class="flexend"><button class="btn btn-primary" data-act="fig-add" type="button">${first ? 'Guardar diseño original' : 'Agregar al historial'}</button></div>
+    </details></div>`;
+}
 function fileSlot(kind, fileName){
   const input = `<input type="file" id="${kind==='bug' ? 'bugFileInput' : 'fileInput'}" hidden />`;
   if(!fileName) return `<div class="dropzone" id="${kind==='bug' ? 'bugDropzone' : 'dropzone'}" data-drop="${kind}"><strong>Haz clic</strong> o arrastra cualquier archivo (Excel, PDF, Word, PowerPoint, texto, imagen…)</div>${input}`;
@@ -2345,6 +2566,7 @@ function ansConfigLine(cfg){
 }
 function certificationPanel(p){
   if(mode!=='cert' || !certDraft){
+    if(!isReceived(p)) return `<div class="panel"><div class="panel-head"><div><h2>Certificación</h2><p class="hint">Para certificar, el proyecto primero debe estar recibido en QA (panel «Recepción en QA», más arriba).</p></div></div></div>`;
     return `<div class="panel"><div class="panel-head"><div><h2>Certificación</h2><p class="hint">Trae los bugs del proyecto, calcula los ANS y el índice de calidad de la entrega.</p></div></div>
       <div class="flexend" style="margin-top:0"><button class="btn btn-primary" data-act="cert-start" type="button">Certificar proyecto</button></div></div>`;
   }
@@ -2422,7 +2644,10 @@ function estBlockHtml(){
     <div class="rowgrid">${left}
       <div><label class="field-label" for="diasPlanInput" style="margin-top:0;">Días hábiles a probar (los defines tú)</label>
         <input type="number" id="diasPlanInput" data-f="diasPlan" min="1" max="400" step="1" inputmode="numeric" value="${val==null?'':val}" placeholder="Ej. ${e.dias || 10}" style="max-width:160px;" />
-        <div class="small" style="margin-top:6px;">Con este plazo el proyecto lleva el contador de días de pruebas (lunes a viernes, sin festivos de Colombia, sin contar los días congelados). Puedes ajustarlo después.</div></div></div></div>`;
+        <label class="field-label" for="draftInicioIn">Fecha de inicio de pruebas</label>
+        <input type="date" id="draftInicioIn" data-f="draftInicio" value="${escapeHtml(draft.testStart||'')}" />
+        <div class="small" id="draftFinTxt" style="margin-top:6px;">${qaFinText(draft.testStart, val)}</div>
+        <div class="small" style="margin-top:6px;">El proyecto queda en el <strong>backlog de QA</strong> al cargarlo. Se <strong>recibe</strong> después (con el ${RECEP_MIN_PCT}% de entrega y esta estimación, inicio y fin) y las pruebas cuentan desde la fecha de inicio. Días hábiles: lunes a viernes, sin festivos de Colombia ni días congelados. Puedes ajustarlo después.</div></div></div></div>`;
 }
 function viewNuevo(){
   const st = createState();
@@ -2431,11 +2656,12 @@ function viewNuevo(){
     <div class="rowgrid"><div><label class="field-label">Archivo de requerimiento</label>
         ${fileSlot('req', draft.fileName)}</div>
       <div><label class="field-label">&nbsp;</label>
-        <button class="btn btn-primary" id="analyzeBtn" data-act="analyze" type="button" ${(!draft.file||draft.analyzing||(!sampleAvailable&&!SHEET_EXT.includes(extOf(draft.file))))?'disabled':''}>${sampleAvailable?'🤖 Analizar con IA':'Leer HU del archivo'}</button>
+        <button class="btn btn-primary" id="analyzeBtn" data-act="analyze" type="button" ${(!draft.file||draft.analyzing)?'disabled':''}>${sampleAvailable?'🤖 Analizar con IA':'Leer HU del archivo'}</button>
         <button class="btn" data-act="add-hu" type="button" style="margin-left:6px;">+ Agregar HU manual</button>
         <div id="analyzeStatus" class="small" style="margin-top:8px;">${draft.analyzing ? 'Analizando documento…' + escapeHtml(draft.progress||'') : (draft.error ? `<span style="color:var(--critical)">${escapeHtml(draft.error)}</span>` : (draft.analyzed && draft.note ? `<span style="color:var(--text-secondary)">${escapeHtml(draft.note)}</span>` : ''))}</div>
         ${!sampleAvailable ? '<div class="small">La IA no está activada en este servidor (falta configurar la llave de Gemini) — los Excel con bloques HU/criterios se leen igual; en otros formatos registra las HU manualmente.</div>' : ''}</div></div>
     <div style="margin-top:16px;">${estBlockHtml()}</div></div>
+    ${figmaPanelDraft()}
     <div class="panel"><div class="panel-head"><div><h2>Historias de usuario</h2><p class="hint">Cada HU tiene su peso sobre el 100% del proyecto; dentro de cada una, el desplegable lista los criterios de aceptación numerados con su propio peso (por defecto iguales).</p></div>
       ${draft.historias.length ? `<span class="flexrow">${draft.analyzed ? '<button class="btn btn-sm btn-ghost" data-act="discard-hu" type="button">Descartar HU detectadas</button>' : ''}<button class="btn btn-sm" data-act="auto-dist" type="button">Distribuir % de las HU por igual</button></span>` : ''}</div>
       <div id="draftList">${draft.historias.length ? draft.historias.map((h,i) => huCard(h, i, 'draft', false, draft.historias)).join('') : `<div class="empty">Aún no hay historias. Analiza un archivo con IA o agrega una manualmente.</div>`}</div>
@@ -2856,8 +3082,10 @@ function buildReportPdf(JsPDF, p){
   const qaE = entries.filter(e => e.tipo==='certificado_qa').pop(), cq = (qaE && qaE.cq) || {};
   const idx = overallIndex(p.historias) || p.overallIndex;
   const entrega = entregaRecibida(p), al = alcanceInfo(p, entries);
-  const startYmd = ymd(new Date(p.createdAt || Date.now())), endYmd = ymd(new Date(closedAt(p) || Date.now()));
-  const calDays = Math.max(0, diffDays(startYmd, endYmd)) + 1, bizDays = bizDaysBetween(startYmd, endYmd, true);
+  const cargadoYmd = ymd(new Date(p.createdAt || Date.now()));
+  const startYmd = toYmdLocal(p.recibidoEn) || cargadoYmd, endYmd = ymd(new Date(closedAt(p) || Date.now()));
+  const testYmd = toYmdLocal(p.testStart) || startYmd;
+  const calDays = Math.max(0, diffDays(testYmd, endYmd)) + 1, bizDays = bizDaysBetween(testYmd, endYmd, true);
   const dShort = s => fmtYmd(s, {day:'numeric', month:'short', year:'numeric'});
   const dLong = s => fmtYmd(s, {day:'numeric', month:'long', year:'numeric'});
   const plural = (n, a, b) => n + ' ' + (n===1 ? a : b);
@@ -2973,7 +3201,7 @@ function buildReportPdf(JsPDF, p){
   font(21, 'bold'); setInk(PC.white); doc.text('Informe de certificación QA', M, 26);
   font(13); const nm = wrap(p.name, CW); setInk('#dce9fb'); doc.text(nm.slice(0,2), M, 35, {lineHeightFactor:1.2});
   font(8.5); setInk('#9fc2f5');
-  doc.text(pdfT('Ingreso a QA: ' + dShort(startYmd) + '   ·   Cierre: ' + dShort(endYmd) + (p.certifiedBy || p.cerradoPor ? '   ·   Certificó: ' + (p.certifiedBy || p.cerradoPor) : '')), M, 47);
+  doc.text(pdfT('Cargado: ' + dShort(cargadoYmd) + '   ·   Recibido en QA: ' + dShort(startYmd) + '   ·   Inicio de pruebas: ' + dShort(testYmd) + '   ·   Cierre: ' + dShort(endYmd) + (p.certifiedBy || p.cerradoPor ? '   ·   Certificó: ' + (p.certifiedBy || p.cerradoPor) : '')), M, 47);
   y = 62;
 
   const kw = (CW - 9) / 4; let kx = M;
@@ -2984,7 +3212,7 @@ function buildReportPdf(JsPDF, p){
   y += 33;
 
   section('Resumen ejecutivo');
-  let resumen = 'El proyecto "' + p.name + '" ingresó a QA el ' + dLong(startYmd) + ' y se cerró el ' + dLong(endYmd) + ', tras ' + plural(bizDays, 'día hábil', 'días hábiles') + ' de ejecución (' + plural(calDays, 'día', 'días') + ' calendario)';
+  let resumen = 'El proyecto "' + p.name + '" se cargó el ' + dLong(cargadoYmd) + ', se recibió en QA el ' + dLong(startYmd) + (testYmd!==startYmd ? ', las pruebas iniciaron el ' + dLong(testYmd) : '') + ' y se cerró el ' + dLong(endYmd) + ', tras ' + plural(bizDays, 'día hábil', 'días hábiles') + ' de ejecución (' + plural(calDays, 'día', 'días') + ' calendario)';
   if(fz.periods) resumen += ', de los cuales ' + plural(fz.days, 'día hábil estuvo', 'días hábiles estuvo') + ' congelado por prioridad de otros proyectos';
   { const tc = testClock(p, entries, ymd(new Date())); if(tc.plan!=null) resumen += '. Se habían planeado ' + plural(tc.plan, 'día hábil', 'días hábiles') + ' de pruebas y se usaron ' + tc.used + (tc.over ? ' (' + plural(tc.over, 'día', 'días') + ' por encima del plan)' : (tc.remaining>0 ? ' (' + plural(tc.remaining, 'día', 'días') + ' antes de lo planeado)' : ' (dentro del plan)')); }
   resumen += '. El requerimiento original del dueño del proyecto era de ' + plural(al.iniHU, 'historia de usuario', 'historias de usuario') + (al.huNuevas || al.crAgregados || al.huExcl || al.crExcl ? '; con los cambios de alcance y ajustes el proyecto se certificó sobre ' + plural(al.vigHU, 'historia de usuario', 'historias de usuario') + ' y ' + plural(al.vigCr, 'criterio', 'criterios') + '' : ' y el alcance no cambió durante la ejecución') + '. Se recibió con una entrega del ' + fmtPct(entrega) + ' del alcance final.';
@@ -3063,7 +3291,7 @@ function buildReportPdf(JsPDF, p){
   /* ================= línea de tiempo ================= */
   section('Línea de tiempo desde el inicio', 'Cómo avanzó la entrega y todas las novedades que afectaron al proyecto, en orden cronológico.', 90);
   progressChart();
-  const trows = [[{t:dShort(startYmd), bold:true}, {t:'Inicio', pill:PC.blue}, 'El proyecto ingresó a QA con ' + plural((p.historias||[]).length, 'historia de usuario', 'historias de usuario') + '.']]
+  const trows = [[{t:dShort(startYmd), bold:true}, {t:'Recepción', pill:PC.blue}, 'El proyecto fue recibido en QA con ' + plural((p.historias||[]).length, 'historia de usuario', 'historias de usuario') + '.']]
     .concat(entries.map(e => {
       const r = novedadRow(e, fz), t = segTipo(e.tipo);
       const col = {stopper:PC.bad, hu_nueva:PC.blue, criterio_nuevo:PC.blue, criterio_actualizado:PC.blue, desistido:PC.mute, no_aplica:PC.mute, reactivado:PC.blue, congelado:PC.warn, reanudado:PC.good, amb_bloqueado:PC.violet, certificado_qa:PC.good, nota:PC.mute, comentario:'#0f9fb5'}[e.tipo] || PC.mute;
@@ -3489,7 +3717,8 @@ async function createProject(){
   const st = createState(); if(!st.can) return;
   const est = draftEstimate(), dp = draftDiasValue();
   const data = cloneJ({ name:draft.name.trim(), createdAt:new Date().toISOString(), createdBy:whoName(), status:'activo', historias:draft.historias, alcanceInicial:{hu:draft.historias.length, criterios:draft.historias.reduce((s,h) => s + (h.criterios||[]).length, 0)},
-    estDias: est.dias || null, estFuente: est.fuente, estRazon: est.ai ? est.ai.razon : '', diasPlan: dp>0 ? Math.round(dp) : null, testStart: ymd(new Date()) });
+    estDias: est.dias || null, estFuente: est.fuente, estRazon: est.ai ? est.ai.razon : '', diasPlan: dp>0 ? Math.round(dp) : null, testStart: /^\d{4}-\d{2}-\d{2}$/.test(draft.testStart||'') ? draft.testStart : null, recepcion:'backlog', recibidoEn:null });
+  if((draft.figma||[]).length) data.figma = cloneJ(draft.figma);
   let id = null;
   await guarded(async () => { id = await stAdd('projects', data); });
   if(!id) return;
@@ -3497,6 +3726,49 @@ async function createProject(){
   draft = newDraft();
   currentView = 'proyectos'; selectedProjectId = id; mode = null;
   render(); toast('Proyecto creado');
+}
+
+/* ---- Recepción en QA ---- */
+async function recibirEnQA(){
+  const p = currentProject(); if(!p) return;
+  const editing = recForm && recForm.edit && isReceived(p);
+  const f = (recForm && recForm.fecha) || ymd(new Date());
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(f)){ toast('Elige una fecha de recepción válida.'); return; }
+  if(f > ymd(new Date())){ toast('La fecha de recepción no puede ser futura.'); return; }
+  if(f < toYmdLocal(p.createdAt)){ toast('La recepción no puede ser anterior al día en que se cargó el proyecto (' + fmtDay(p.createdAt) + ').'); return; }
+  if(!editing){
+    const c = recepcionCheck(p);
+    if(!c.ok){ toast('Aún no cumple las condiciones para recibirse en QA.'); return; }
+  }
+  recForm = null;
+  await patchProject(np => { np.recepcion = 'recibido'; np.recibidoEn = f; delete np.recibidoAntes; if(!editing){ np.recibidoPor = whoName(); np.recibidoAt = new Date().toISOString(); } });
+  toast(editing ? 'Fecha de recepción actualizada' : 'Proyecto recibido en QA');
+}
+
+/* ---- Diseño (Figma): historial de versiones con comentario de cambios de alcance ---- */
+function figNew(p){ return { pid:p.id, url:'', titulo:'', comentario:'', files:[], error:'' }; }
+function figEntry(o, original){
+  return { id:'f' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), tipo:o.tipo, url:o.url||'', nombre:o.nombre||'', tamano:o.tamano||0, mime:o.mime||'',
+    titulo:String(o.titulo||'').slice(0,120), fecha:new Date().toISOString(), autor:whoName(), original:!!original, comentario:String(o.comentario||'').slice(0,1500) };
+}
+async function figAdd(){
+  const p = currentProject(); if(!p) return;
+  if(!figForm || figForm.pid!==p.id) figForm = figNew(p);
+  const f = figForm, url = f.url.trim(), hasFiles = f.files.length > 0;
+  if(!url && !hasFiles){ f.error = 'Pega el enlace de Figma o elige al menos un archivo.'; render(); return; }
+  if(url){ const pr = figUrlProblem(url); if(pr){ f.error = pr; render(); return; } }
+  const first = !(p.figma||[]).length, com = f.comentario.trim(), titulo = f.titulo.trim();
+  const entries = [];
+  if(url) entries.push(figEntry({tipo:'url', url:url.slice(0,1000), titulo, comentario:com}, first));
+  f.files.forEach((x,i) => entries.push(figEntry({tipo:'archivo', nombre:x.name, tamano:x.size, mime:x.type, titulo: url ? '' : titulo, comentario:(i===0 && !url) ? com : ''}, first)));
+  figForm = null;
+  await patchProject(np => { np.figma = (np.figma||[]).concat(entries); });
+  toast(first ? 'Diseño original registrado' : 'Actualización del diseño registrada');
+}
+async function figSaveComment(){
+  if(!figEdit) return; const id = figEdit.id, com = figEdit.comentario.trim().slice(0,1500); figEdit = null;
+  await patchProject(np => { const it = (np.figma||[]).find(x => x.id===id); if(it) it.comentario = com; });
+  toast('Comentario guardado');
 }
 
 /* ---- Azure DevOps (solo lectura; el servidor guarda la llave y sincroniza) ---- */
@@ -3952,7 +4224,7 @@ function onClick(e){
       currentView = el.dataset.tab; critForm = null; qaEdit = null; selectedProjectId = null; fullSegId = null; fullSegFilter = ''; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null;
       if(currentView==='azure') ansDraft = null;
       render(); break;
-    case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; azForm = null; seg = newSegForm(); render(); azMaybeSync(projects.find(x => x.id===el.dataset.id)); break;
+    case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; azForm = null; figForm = null; figEdit = null; figDel = null; recForm = null; recUndo = false; seg = newSegForm(); render(); azMaybeSync(projects.find(x => x.id===el.dataset.id)); break;
     case 'az-sync': { const ap = currentProject(); if(ap) azSync(ap, true); break; }
     case 'az-edit': { const ap = currentProject(); if(ap){ azForm = azNew(ap); render(); } break; }
     case 'az-cancel': azForm = null; render(); break;
@@ -4012,6 +4284,19 @@ function onClick(e){
     case 'critform-cancel': critForm = null; render(); break;
     case 'crit-scope-edit': startCritChange(hi, ci, 'alcance', true); break;
     case 'analyze': analyzeRequirement(); break;
+    case 'fig-pick-draft': { const i = $('#figFileDraft'); if(i) i.click(); break; }
+    case 'fig-pick-proj': { const i = $('#figFileProj'); if(i) i.click(); break; }
+    case 'fig-add-draft': { const pr = figUrlProblem(draft.figUrl); if(pr){ draft.figError = pr; render(); break; }
+      draft.figma.push(figEntry({tipo:'url', url:draft.figUrl.trim().slice(0,1000), titulo:draft.figTitulo.trim()}, true)); draft.figUrl = ''; draft.figTitulo = ''; draft.figError = ''; render(); toast('Enlace agregado'); break; }
+    case 'fig-del-draft': draft.figma = draft.figma.filter(x => x.id!==el.dataset.id); render(); break;
+    case 'fig-file-rm': if(figForm){ figForm.files.splice(Number(el.dataset.i),1); render(); } break;
+    case 'fig-add': figAdd(); break;
+    case 'fig-edit': { const fp = currentProject(); const it = fp && (fp.figma||[]).find(x => x.id===el.dataset.id); if(it){ figEdit = {id:it.id, comentario:it.comentario||''}; figDel = null; render(); } break; }
+    case 'fig-edit-cancel': figEdit = null; render(); break;
+    case 'fig-edit-save': figSaveComment(); break;
+    case 'fig-del': figDel = el.dataset.id; figEdit = null; render(); break;
+    case 'fig-del-cancel': figDel = null; render(); break;
+    case 'fig-del-ok': { const id = el.dataset.id; figDel = null; patchProject(np => { np.figma = (np.figma||[]).filter(x => x.id!==id); }).then(() => toast('Quitado del historial')); break; }
     case 'pick-file': { const i = $(el.dataset.kind==='bug' ? '#bugFileInput' : '#fileInput'); if(i) i.click(); break; }
     case 'remove-file':
       if(el.dataset.kind==='bug'){ if(certDraft){ certDraft.file = null; certDraft.fileName = ''; certDraft.status = ''; } }
@@ -4022,14 +4307,19 @@ function onClick(e){
     case 'create': createProject(); break;
     case 'est-ai': refineEstimateAI(); break;
     case 'est-use': draft.diasTouched = false; draft.diasPlan = null; render(); break;
-    case 'qa-edit': { const pr = currentProject(); if(pr){ qaEdit = { dias: pr.diasPlan ? String(pr.diasPlan) : '', inicio: toYmdLocal(pr.testStart) || toYmdLocal(pr.createdAt) }; render(); } break; }
+    case 'qa-edit': { const pr = currentProject(); if(pr){ qaEdit = { dias: pr.diasPlan ? String(pr.diasPlan) : '', inicio: toYmdLocal(pr.testStart) || (isReceived(pr) ? toYmdLocal(pr.createdAt) : '') }; render(); } break; }
     case 'qa-cancel': qaEdit = null; render(); break;
+    case 'rec-edit': { const pr = currentProject(); if(pr){ recForm = {fecha: toYmdLocal(pr.recibidoEn) || ymd(new Date()), edit:true}; recUndo = false; render(); } break; }
+    case 'rec-cancel': recForm = null; render(); break;
+    case 'rec-save': recibirEnQA(); break;
+    case 'rec-undo-ask': recUndo = true; recForm = null; render(); break;
+    case 'rec-undo-cancel': recUndo = false; render(); break;
+    case 'rec-undo-ok': recUndo = false; patchProject(np => { np.recepcion = 'backlog'; np.recibidoEn = null; np.recibidoPor = null; np.recibidoAt = null; delete np.recibidoAntes; }).then(() => toast('Recepción deshecha: el proyecto volvió al backlog de QA')); break;
     case 'qa-save': {
       if(!qaEdit) break;
       const d = qaEdit.dias==='' ? null : Math.round(Number(qaEdit.dias));
       if(d!=null && !(d >= 1 && d <= 400)){ toast('Los días a probar deben ser entre 1 y 400.'); break; }
       if(!/^\d{4}-\d{2}-\d{2}$/.test(qaEdit.inicio||'')){ toast('Elige una fecha de inicio válida.'); break; }
-      if(qaEdit.inicio > ymd(new Date())){ toast('El inicio de pruebas no puede ser futuro.'); break; }
       const f = qaEdit; qaEdit = null;
       patchProject(np => { np.diasPlan = d; np.testStart = f.inicio; }).then(() => toast('Plazo de pruebas actualizado')); break;
     }
@@ -4069,11 +4359,17 @@ function onInput(e){
       if(certDraft && certDraft.historias[hi]){ certDraft.historias[hi][f] = Number(el.value)||0;
         const c = document.getElementById('certIdx-' + hi); if(c) c.innerHTML = indexBadge(huIndex(certDraft.historias[hi])); } break;
     case 'projName': draft.name = el.value; updateCreateButton(); break;
-    case 'diasPlan': { draft.diasTouched = true; draft.diasPlan = el.value==='' ? null : Math.max(0, Math.round(Number(el.value)||0)); const ub = $('#estUseBtn'), es = draftEstimate().dias; if(ub) ub.style.display = es && draft.diasPlan!==es ? '' : 'none'; break; }
-    case 'qaDias': if(qaEdit) qaEdit.dias = el.value; break;
-    case 'qaInicio': if(qaEdit) qaEdit.inicio = el.value; break;
+    case 'diasPlan': { draft.diasTouched = true; draft.diasPlan = el.value==='' ? null : Math.max(0, Math.round(Number(el.value)||0)); const ub = $('#estUseBtn'), es = draftEstimate().dias; if(ub) ub.style.display = es && draft.diasPlan!==es ? '' : 'none'; { const t = $('#draftFinTxt'); if(t) t.innerHTML = qaFinText(draft.testStart, draftDiasValue()); } break; }
+    case 'qaDias': if(qaEdit){ qaEdit.dias = el.value; const t = $('#qaFinTxt'); if(t) t.innerHTML = qaFinText(qaEdit.inicio, qaEdit.dias); } break;
+    case 'qaInicio': if(qaEdit){ qaEdit.inicio = el.value; const t = $('#qaFinTxt'); if(t) t.innerHTML = qaFinText(qaEdit.inicio, qaEdit.dias); } break;
+    case 'draftInicio': { draft.testStart = el.value; const t = $('#draftFinTxt'); if(t) t.innerHTML = qaFinText(draft.testStart, draftDiasValue()); break; }
+    case 'recFecha': recForm = Object.assign(recForm || {}, {fecha: el.value}); break;
     case 'certPaste': if(certDraft) certDraft.pasted = el.value; break;
     case 'critform': if(critForm) critForm[el.dataset.k] = el.value; break;
+    case 'figUrl': draft.figUrl = el.value; draft.figError = ''; break;
+    case 'figTitulo': draft.figTitulo = el.value; break;
+    case 'figf': { const fp = currentProject(); if(!fp) break; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); figForm[el.dataset.k] = el.value; figForm.error = ''; break; }
+    case 'figEdit': if(figEdit) figEdit.comentario = el.value; break;
     case 'cdraft': (cdraft[hi] = cdraft[hi] || {crit:'', texto:''}).texto = el.value; break;
     case 'seg': seg[el.dataset.k] = el.value; cqTotalRefresh('seg', seg); break;
     case 'segEdit': if(segEdit){ segEdit[el.dataset.k] = el.value; cqTotalRefresh('segEdit', segEdit); } break;
@@ -4089,6 +4385,8 @@ function onInput(e){
 function onChange(e){
   const el = e.target;
   if(el.id==='fileInput' && el.files[0]){ draft.file = el.files[0]; draft.fileName = el.files[0].name; draft.error = null; render(); return; }
+  if(el.id==='figFileDraft' && el.files.length){ const fs = Array.from(el.files); el.value = ''; fs.forEach(f => draft.figma.push(figEntry({tipo:'archivo', nombre:f.name, tamano:f.size, mime:f.type||'', titulo:draft.figTitulo.trim()}, true))); draft.figTitulo = ''; draft.figError = ''; render(); toast(fs.length + ' archivo(s) registrado(s)'); return; }
+  if(el.id==='figFileProj' && el.files.length){ const fp = currentProject(); if(!fp) return; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); Array.from(el.files).forEach(f => figForm.files.push({name:f.name, size:f.size, type:f.type||''})); el.value = ''; render(); return; }
   if(el.id==='bugFileInput' && el.files[0]){ if(certDraft){ certDraft.file = el.files[0]; certDraft.fileName = el.files[0].name; certDraft.status = ''; render(); } return; }
   if(el.id==='ambFileInput' && el.files[0]){ const fl = el.files[0]; el.value = ''; ambImportFile(fl); return; }
   const f = el.dataset && el.dataset.f; if(!f) return;
