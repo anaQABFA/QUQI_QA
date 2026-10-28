@@ -371,6 +371,22 @@
   .figitem .figmeta{ font-size:12px; color:var(--text-secondary); margin-top:4px; }
   .figitem .figcom{ margin-top:8px; font-size:13px; line-height:1.55; white-space:pre-wrap; }
   .badge-orig{ background:var(--accent-soft, #e6f0ff); color:var(--accent-strong); }
+
+  .pru-bar{ display:flex; height:14px; border-radius:999px; overflow:hidden; background:var(--surface-alt); border:1px solid var(--border); margin:10px 0 12px; }
+  .pru-bar i{ display:block; height:100%; }
+  .pru-bar .s-ok{ background:var(--good); } .pru-bar .s-fail{ background:var(--critical); } .pru-bar .s-block{ background:var(--serious); } .pru-bar .s-pause{ background:var(--warning); } .pru-bar .s-pend{ background:var(--gridline); }
+  .pru-t{ border-left:4px solid var(--c, var(--border)); }
+  .pru-t .s{ font-size:11.5px; color:var(--text-secondary); }
+  .pru-big{ font-size:28px; font-weight:700; line-height:1.1; }
+  .pru-formula{ font-size:13px; color:var(--text-secondary); background:var(--surface-alt); border-radius:10px; padding:8px 12px; margin:8px 0; }
+  .prio{ display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--border); white-space:nowrap; }
+  .prio.p1{ background:rgba(208,59,59,.14); color:var(--critical); border-color:rgba(208,59,59,.4); }
+  .prio.p2{ background:rgba(236,131,90,.16); color:var(--serious-ink); border-color:rgba(236,131,90,.45); }
+  .prio.p3{ background:rgba(250,178,25,.16); color:var(--warn-ink); border-color:rgba(250,178,25,.45); }
+  .prio.p4{ background:var(--surface-alt); color:var(--text-secondary); }
+  .prio.auto{ border-style:dashed; }
+  .azfilters{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:6px 0 10px; }
+  .azfilters select{ width:auto; max-width:220px; padding:4px 8px; font-size:12.5px; }
   .az-chip{ display:inline-block; padding:2px 9px; border-radius:999px; border:1px solid var(--border); font-size:12px; margin:2px 4px 2px 0; }
   .az-chip b{ font-weight:700; }
   .az-link{ color:var(--accent-strong); font-weight:600; text-decoration:none; }
@@ -1003,6 +1019,46 @@ function evalBug(b, cfg, now){
   const h = hoursBetween(start, now, cfg);
   return {sev, limite, horas:h, estado: h>limite ? 'vencido' : 'en_curso'};
 }
+
+/* ---- Prioridad del bug: la de Azure (1-4); si no la trae se asigna según la severidad (crítica→P1 … baja→P4; sin dato→P3) ---- */
+const PRIO_LABEL = {1:'P1 · Crítica', 2:'P2 · Alta', 3:'P3 · Media', 4:'P4 · Baja'};
+const SEV_TO_PRIO = {critica:1, alta:2, media:3, baja:4};
+function bugPriority(b){
+  const n = parseInt(String((b && b.pr) || '').trim(), 10);
+  if(n>=1 && n<=4) return {n:n, auto:false};
+  return {n: SEV_TO_PRIO[severityKey((b && b.s) || '')] || 3, auto:true};
+}
+/* Grupos para filtrar: abiertos / cerrados / en pruebas QA / ambiente (por estado, etiqueta o título). */
+function bugIsQA(b){ return !isClosedState(b.e) && /prueba|testing|\btest\b|\bqa\b|verific|valida|retest/i.test(String(b.e||'')); }
+function bugIsAmb(b){ return /ambient|environment|despliegue|infraestructura/i.test([b.e, b.p, b.t].join(' ')); }
+function bugInGroup(b, g){
+  switch(g){
+    case 'abiertos': return !isClosedState(b.e);
+    case 'cerrados': return isClosedState(b.e);
+    case 'qa': return bugIsQA(b);
+    case 'ambiente': return bugIsAmb(b);
+    default: return true;
+  }
+}
+
+/* ---- Avance de pruebas: % de QA certificado ----
+   Base = casos totales − no aplicables (esa base es el 100%). Exitosos, fallidos, bloqueados y pausados se miden sobre esa base. */
+function pruInt(v){ if(v===''||v==null) return null; const n = Number(String(v).trim()); return Number.isInteger(n) && n>=0 ? n : null; }
+function pruCalc(v){
+  v = v || {};
+  const g = k => pruInt(v[k]) || 0;
+  const total = g('total'), na = g('na'), ok = g('ok'), fail = g('fail'), block = g('block'), pause = g('pause');
+  const base = total - na, used = ok + fail + block + pause, pend = base - used, errors = [];
+  ['total','na','ok','fail','block','pause'].forEach(k => { if(v[k]!=='' && v[k]!=null && pruInt(v[k])==null) errors.push('Usa solo números enteros (0 o más) en todos los campos.'); });
+  if(total<=0) errors.push('Indica el total de casos de prueba.');
+  else if(na>total) errors.push('Los no aplicables (' + na + ') no pueden superar el total de casos (' + total + ').');
+  else if(base<=0) errors.push('Todos los casos son no aplicables: no hay base para certificar.');
+  if(base>0 && used>base) errors.push('Exitosos + fallidos + bloqueados + pausados (' + used + ') superan los casos aplicables (' + base + ').');
+  const valid = !errors.length, pc = n => valid ? n/base*100 : null;
+  return {total, na, base, ok, fail, block, pause, pend, used, errors: Array.from(new Set(errors)), valid,
+    cert: pc(ok), probado: pc(ok+fail), pFail: pc(fail), pBlock: pc(block), pPause: pc(pause), pPend: pc(pend),
+    exito: valid && ok+fail>0 ? ok/(ok+fail)*100 : null};
+}
 function summarizeBugs(bugs, cfg, now){
   const r = {total:bugs.length, cumple:0, incumple:0, vencido:0, en_curso:0, sin_fecha:0, pct:null, avgHoras:null, evals:[]};
   let sum = 0, n = 0;
@@ -1574,6 +1630,7 @@ let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinc
 let figForm = null, figEdit = null, figDel = null;
 /* Recepción en QA: formulario de fecha y confirmación de deshacer */
 let recForm = null, recUndo = false;
+let pruForm = null, azFilt = {};
 let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
@@ -1894,7 +1951,6 @@ function sampleErrorCopy(e){
     empty_completion:'El asistente no devolvió resultado — intenta de nuevo.',
     invalid_json:'El asistente no devolvió un formato válido — intenta de nuevo.',
     sampling_disabled:'La IA no está activada (falta configurar la llave de Gemini). Pídele al administrador que la active, o agrega las HU manualmente.',
-    bad_model:'El modelo de Gemini configurado no existe (revisa GEMINI_MODEL en Render).',
     bad_key:'La llave de Gemini no es válida o no tiene permiso. Avisa al administrador.',
     upstream:'No se pudo contactar al servicio de IA. Intenta de nuevo en un momento.',
     timeout:'La IA tardó demasiado en responder. Intenta de nuevo (o con un documento más corto).',
@@ -2393,6 +2449,7 @@ function viewProjectDetail(){
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
   body += recepcionPanel(p);
   body += qaClockPanel(p);
+  body += pruebasPanel(p);
   body += azurePanel(p);
   body += figmaPanel(p);
   body += `<div class="panel"><div class="panel-head"><div><h2>Historias de usuario</h2>
@@ -2435,11 +2492,62 @@ function azSummary(doc){
   const t = (l,v) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div></div>`;
   return `<div class="daytiles">${t('Bugs vinculados', bugs.length)}${t('Abiertos', open.length)}${t('Cerrados / resueltos', bugs.length - open.length)}${t('Abiertos críticos / altos', sev.critica + ' / ' + sev.alta)}${t('Abiertos medios / bajos', sev.media + ' / ' + sev.baja)}</div>`;
 }
-function azBugTable(doc){
-  const now = new Date(), base = doc.webBase || '';
-  const rows = (doc.bugs || []).map(b => { const ev = evalBug(b, ansCfg, now);
-    return `<tr><td class="mono" data-label="Bug">${base ? `<a class="az-link" href="${escapeHtml(base + b.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.id)}</a>` : escapeHtml(b.id)}</td><td data-label="Título" style="min-width:180px">${escapeHtml(b.t)}</td><td data-label="Severidad">${SEV_LABEL[ev.sev]}</td><td data-label="Estado">${escapeHtml(b.e)}</td><td data-label="Creado">${b.c ? fmtDate(b.c) : '—'}</td><td data-label="Padre (HU)" style="min-width:120px">${escapeHtml(String(b.p||'').slice(0,60))}</td></tr>`; }).join('');
-  return `<div class="scroll-y"><table class="stack"><thead><tr><th>Bug</th><th>Título</th><th>Severidad</th><th>Estado</th><th>Creado</th><th>Padre (HU)</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+function azBugTable(doc, pid){
+  const now = new Date(), base = doc.webBase || '', all = doc.bugs || [];
+  const f = azFilt[pid] || {g:'todos', est:'', pri:''};
+  const groups = [['todos','Todos'],['abiertos','Abiertos'],['cerrados','Cerrados'],['qa','En pruebas QA'],['ambiente','Ambiente']];
+  const chips = groups.map(([k,l]) => `<button class="chipbtn ${f.g===k?'active':''}" data-act="az-fg" data-v="${k}" type="button">${l} (${all.filter(b => bugInGroup(b,k)).length})</button>`).join('');
+  const states = Array.from(new Set(all.map(b => b.e).filter(Boolean))).sort();
+  const selE = `<select data-f="azfEst" aria-label="Estado exacto en Azure"><option value="">Todos los estados</option>${states.map(s => `<option value="${escapeHtml(s)}" ${f.est===s?'selected':''}>${escapeHtml(s)} (${all.filter(b => b.e===s).length})</option>`).join('')}</select>`;
+  const selP = `<select data-f="azfPri" aria-label="Prioridad"><option value="">Todas las prioridades</option>${[1,2,3,4].map(n => `<option value="${n}" ${String(f.pri)===String(n)?'selected':''}>${PRIO_LABEL[n]} (${all.filter(b => bugPriority(b).n===n).length})</option>`).join('')}</select>`;
+  const list = all.filter(b => bugInGroup(b, f.g) && (!f.est || b.e===f.est) && (!f.pri || String(bugPriority(b).n)===String(f.pri)))
+    .map(b => ({b, ev: evalBug(b, ansCfg, now), pr: bugPriority(b), cl: isClosedState(b.e)}))
+    .sort((x,y) => (x.cl - y.cl) || (x.pr.n - y.pr.n) || String(y.b.c||'').localeCompare(String(x.b.c||'')));
+  const rows = list.map(({b, ev, pr}) =>
+    `<tr><td class="mono" data-label="Bug">${base ? `<a class="az-link" href="${escapeHtml(base + b.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.id)}</a>` : escapeHtml(b.id)}</td><td data-label="Título" style="min-width:180px">${escapeHtml(b.t)}</td><td data-label="Prioridad"><span class="prio p${pr.n}${pr.auto?' auto':''}" title="${pr.auto ? 'Azure no trae prioridad: se asignó según la severidad (' + SEV_LABEL[ev.sev] + ')' : 'Prioridad que trae Azure'}">${PRIO_LABEL[pr.n]}${pr.auto ? ' · auto' : ''}</span></td><td data-label="Severidad">${SEV_LABEL[ev.sev]}</td><td data-label="Estado">${escapeHtml(b.e)}</td><td data-label="Creado">${b.c ? fmtDate(b.c) : '—'}</td><td data-label="Padre (HU)" style="min-width:120px">${escapeHtml(String(b.p||'').slice(0,60))}</td></tr>`).join('');
+  const empty = rows ? '' : '<p class="small" style="padding:10px;">Ningún bug cumple los filtros elegidos.</p>';
+  return `<div class="chipbar">${chips}</div><div class="azfilters">${selE}${selP}<span class="small">${list.length} de ${all.length} · abiertos primero, por prioridad. «En pruebas QA» y «Ambiente» se detectan por el estado, la etiqueta o el título.</span></div><div class="scroll-y"><table class="stack"><thead><tr><th>Bug</th><th>Título</th><th>Prioridad</th><th>Severidad</th><th>Estado</th><th>Creado</th><th>Padre (HU)</th></tr></thead><tbody>${rows}</tbody></table>${empty}</div>`;
+}
+/* ================= % de QA certificado ================= */
+function pruLiveHtml(c){
+  if(!c.valid) return c.errors.length ? `<div class="banner banner-warn"><span>⚠️</span><span>${c.errors.map(escapeHtml).join('<br>')}</span></div>` : '';
+  return pruResultHtml(c);
+}
+function pruResultHtml(c){
+  const seg = (cls, n) => n>0 ? `<i class="${cls}" style="width:${(n/c.base*100).toFixed(3)}%"></i>` : '';
+  const t = (label, n, pct, color, sub) => `<div class="clkstat pru-t" style="--c:${color}"><div class="v">${n}${pct!=null ? ' <span class="small" style="font-weight:500;">· ' + fmtPct(pct) + '</span>' : ''}</div><div class="l">${label}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
+  return `<div class="pru-formula">${c.total} casos − ${c.na} no aplicables = <strong>${c.base} casos aplicables</strong> (esa base es el 100%).</div>
+    <div class="pru-bar" role="img" aria-label="Exitosos ${fmtPct(c.cert)}, fallidos ${fmtPct(c.pFail)}, bloqueados ${fmtPct(c.pBlock)}, pausados ${fmtPct(c.pPause)}, pendientes ${fmtPct(c.pPend)}">${seg('s-ok',c.ok)}${seg('s-fail',c.fail)}${seg('s-block',c.block)}${seg('s-pause',c.pause)}${seg('s-pend',c.pend)}</div>
+    <div class="clkstats">${t('Exitosos (certificados)', c.ok, c.cert, 'var(--good)')}${t('Fallidos por bug', c.fail, c.pFail, 'var(--critical)')}${t('Bloqueados por ambiente', c.block, c.pBlock, 'var(--serious)')}${t('Pausados', c.pause, c.pPause, 'var(--warning)')}${t('Pendientes de probar', c.pend, c.pPend, 'var(--gridline)')}${t('No aplicables', c.na, null, 'var(--border)', 'fuera de la base')}</div>
+    <p class="small" style="margin:10px 0 0;">Probado: <strong>${c.ok + c.fail} de ${c.base}</strong> (${fmtPct(c.probado)})${c.exito!=null ? ' · Éxito sobre lo probado: <strong>' + fmtPct(c.exito) + '</strong>' : ''}${c.pend + c.block + c.pause + c.fail > 0 ? ' · Falta certificar ' + (c.base - c.ok) + ' caso(s).' : ''}</p>`;
+}
+function pruebasPanel(p){
+  if(!isReceived(p)) return '';
+  const closed = isClosed(p), saved = p.pruebas || null;
+  const editing = pruForm && pruForm.pid===p.id && !closed;
+  const head = (hint, right) => `<div class="panel-head"><div><h2>% de QA certificado</h2><p class="hint">${hint}</p></div>${right||''}</div>`;
+  if(editing){
+    const f = pruForm, c = pruCalc(f);
+    const fld = (k, label, ph) => `<div><label class="field-label" for="pru_${k}">${label}</label><input type="number" min="0" step="1" inputmode="numeric" id="pru_${k}" data-f="pru" data-k="${k}" value="${escapeHtml(String(f[k]))}" placeholder="${ph}" /></div>`;
+    return `<div class="panel">${head('Registra cómo van los casos de prueba. Los <strong>no aplicables</strong> salen de la base; el resto se mide sobre los casos aplicables.')}
+      <div class="rowgrid">${fld('total','Total de casos de prueba','Ej. 100')}${fld('na','No aplicables','Ej. 20')}${fld('ok','Exitosos','Ej. 40')}${fld('fail','Fallidos (con bug)','Ej. 20')}${fld('block','Bloqueados por ambiente','Ej. 20')}${fld('pause','Pausados','Ej. 0')}</div>
+      <p class="small" style="margin:6px 0 0;">Los pendientes se calculan solos: aplicables − exitosos − fallidos − bloqueados − pausados.</p>
+      <div id="pruLive" style="margin-top:10px;">${pruLiveHtml(c)}</div>
+      <div class="flexend"><button class="btn btn-ghost" data-act="pru-cancel" type="button">Cancelar</button><button class="btn btn-primary" data-act="pru-save" type="button">Guardar avance</button></div></div>`;
+  }
+  if(!saved){
+    return `<div class="panel">${head('Probado vs. certificado: compara los casos exitosos contra los casos aplicables (total menos no aplicables).')}
+      <div class="empty">Aún no se registra el avance de pruebas.</div>
+      ${closed ? '' : '<div class="flexend"><button class="btn btn-primary" data-act="pru-edit" type="button">Registrar avance de pruebas</button></div>'}</div>`;
+  }
+  const c = pruCalc(saved), doc = azDoc(p), openBugs = doc ? (doc.bugs || []).filter(b => !isClosedState(b.e)).length : null;
+  const right = c.valid ? `<div style="text-align:right"><div class="pru-big num">${fmtPct(c.cert)}</div><div class="small">certificado (exitosos / aplicables)</div></div>` : '';
+  const warnBug = c.valid && c.fail>0 && openBugs!=null && c.fail>openBugs ? `<div class="banner banner-warn" style="margin-top:10px;"><span>⚠️</span><span>Hay ${c.fail} casos fallidos y solo ${openBugs} bug(s) abiertos en Azure: verifica que cada caso fallido tenga su bug.</span></div>` : '';
+  const hist = (p.pruebasHist || []).slice(-8).reverse();
+  const histHtml = hist.length > 1 ? `<details class="crit" data-key="pruhist" ${openDetails.has('pruhist')?'open':''}><summary>Historial de avance (${hist.length})</summary><div class="scroll-y"><table class="stack"><thead><tr><th>Fecha</th><th>Certificado</th><th>Probado</th><th>Exitosos</th><th>Fallidos</th><th>Bloqueados</th><th>Pausados</th><th>No aplic.</th><th>Registró</th></tr></thead><tbody>${hist.map(h => { const k = pruCalc(h); return `<tr><td data-label="Fecha">${fmtDateTime(h.at)}</td><td data-label="Certificado">${k.valid ? fmtPct(k.cert) : '—'}</td><td data-label="Probado">${k.valid ? fmtPct(k.probado) : '—'}</td><td data-label="Exitosos">${k.ok}</td><td data-label="Fallidos">${k.fail}</td><td data-label="Bloqueados">${k.block}</td><td data-label="Pausados">${k.pause}</td><td data-label="No aplic.">${k.na}</td><td data-label="Registró">${escapeHtml(h.by||'—')}</td></tr>`; }).join('')}</tbody></table></div></details>` : '';
+  return `<div class="panel">${head('Probado vs. certificado sobre los casos aplicables (los no aplicables salen de la base).' + (saved.at ? ' Actualizado ' + fmtDateTime(saved.at) + (saved.by ? ' por ' + escapeHtml(saved.by) : '') + '.' : ''), right)}
+    ${c.valid ? pruResultHtml(c) : `<div class="banner banner-warn"><span>⚠️</span><span>${c.errors.map(escapeHtml).join('<br>')}</span></div>`}${warnBug}${histHtml}
+    ${closed ? '' : '<div class="flexend"><button class="btn btn-sm" data-act="pru-edit" type="button">Actualizar avance</button></div>'}</div>`;
 }
 function azurePanel(p){
   if(!azNS || isClosed(p)) return '';
@@ -2461,7 +2569,7 @@ function azurePanel(p){
     <div style="margin-bottom:8px;">${azCfgLine(p.azureCfg)}</div>
     <p class="small" style="margin:0 0 12px;">${when}</p>${err}${err2}
     ${doc && doc.syncedAt ? azSummary(doc) + (doc.truncated ? '<p class="small">Hay más de 1500 bugs con este vínculo: se muestran los primeros 1500. Acota con iteración o etiqueta.</p>' : '') : ''}
-    ${doc && (doc.bugs||[]).length ? `<details class="crit" data-key="azbugs" ${openDetails.has('azbugs')?'open':''}><summary>Bugs de Azure (${doc.bugs.length})</summary>${azBugTable(doc)}</details>` : ''}
+    ${doc && (doc.bugs||[]).length ? `<details class="crit" data-key="azbugs" ${openDetails.has('azbugs')?'open':''}><summary>Bugs de Azure (${doc.bugs.length})</summary>${azBugTable(doc, p.id)}</details>` : ''}
     <div class="flexend"><button class="btn btn-sm" data-act="az-sync" type="button" ${busy?'disabled':''}>${busy ? 'Sincronizando…' : '↻ Sincronizar ahora'}</button><button class="btn btn-sm btn-ghost" data-act="az-edit" type="button">Editar vínculo</button><button class="btn btn-sm btn-ghost" data-act="az-unlink" type="button">Quitar vínculo</button></div></div>`;
 }
 function azCertBox(p){
@@ -4226,6 +4334,21 @@ function onClick(e){
       if(currentView==='azure') ansDraft = null;
       render(); break;
     case 'open-project': { const op = projects.find(x => x.id===el.dataset.id); currentView = op && isClosed(op) ? 'cerrados' : 'proyectos'; } fullSegId = null; selectedProjectId = el.dataset.id; mode = null; work = null; certDraft = null; delConfirm = null; segDel = null; segEdit = null; resumeForm = null; qaEdit = null; azForm = null; figForm = null; figEdit = null; figDel = null; recForm = null; recUndo = false; seg = newSegForm(); render(); azMaybeSync(projects.find(x => x.id===el.dataset.id)); break;
+    case 'az-fg': { const ap = currentProject(); if(ap){ azFilt[ap.id] = Object.assign({g:'todos', est:'', pri:''}, azFilt[ap.id], {g: el.dataset.v}); render(); } break; }
+    case 'pru-edit': { const pr = currentProject(); if(pr){ const s0 = pr.pruebas || {}; pruForm = {pid:pr.id}; ['total','na','ok','fail','block','pause'].forEach(k => { pruForm[k] = s0[k]==null ? '' : String(s0[k]); }); render(); } break; }
+    case 'pru-cancel': pruForm = null; render(); break;
+    case 'pru-save': {
+      const pr = currentProject(); if(!pr || !pruForm || pruForm.pid!==pr.id) break;
+      const c = pruCalc(pruForm); if(!c.valid){ toast(c.errors[0]); break; }
+      const snap = {total:c.total, na:c.na, ok:c.ok, fail:c.fail, block:c.block, pause:c.pause, at:new Date().toISOString(), by:whoName()};
+      pruForm = null;
+      patchProject(np => {
+        const last = (np.pruebasHist || [])[(np.pruebasHist || []).length-1];
+        np.pruebas = snap; np.pruebasHist = (np.pruebasHist || []);
+        if(!last || ['total','na','ok','fail','block','pause'].some(k => last[k]!==snap[k])) np.pruebasHist.push(snap);
+        np.pruebasHist = np.pruebasHist.slice(-100);
+      }).then(() => toast('Avance de pruebas guardado')); break;
+    }
     case 'az-sync': { const ap = currentProject(); if(ap) azSync(ap, true); break; }
     case 'az-edit': { const ap = currentProject(); if(ap){ azForm = azNew(ap); render(); } break; }
     case 'az-cancel': azForm = null; render(); break;
@@ -4377,6 +4500,7 @@ function onInput(e){
     case 'resume': if(resumeForm) resumeForm.fecha = el.value; break;
     case 'ans': setAnsField(el); break;
     case 'az': azure[el.dataset.k] = el.value; updateWiql(); break;
+    case 'pru': { if(pruForm){ pruForm[el.dataset.k] = el.value; const lv = document.getElementById('pruLive'); if(lv) lv.innerHTML = pruLiveHtml(pruCalc(pruForm)); } break; }
     case 'azl': { const ap = currentProject(); if(!ap) break; if(!azForm || azForm.pid!==ap.id) azForm = azNew(ap); azForm[el.dataset.k] = el.value; azForm.preview = null; azForm.error = ''; break; }
     case 'newAnalyst': bit.newName = el.value; break;
     case 'slotD': { const x = slotOf(el.dataset.s); if(x){ x.d = el.value; queueSave(curKey()); } break; }
@@ -4394,6 +4518,7 @@ function onChange(e){
   if(f.indexOf('amb')===0){ ambChange(f, el); return; }
   if(el.tagName!=='SELECT' && el.type!=='checkbox') return;
   switch(f){
+    case 'azfEst': case 'azfPri': { const ap = currentProject(); if(ap){ const cur = Object.assign({g:'todos', est:'', pri:''}, azFilt[ap.id]); if(f==='azfEst') cur.est = el.value; else cur.pri = el.value; azFilt[ap.id] = cur; render(); } break; }
     case 'seg': {
       const k = el.dataset.k, p = currentProject();
       if(k==='pendiente'){ seg.pendiente = el.checked; break; }
