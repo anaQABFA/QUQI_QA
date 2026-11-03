@@ -95,6 +95,24 @@ git push -u origin main
 
 Nota: en el plan gratuito de Render el servicio duerme sin visitas, así que la actualización automática solo corre mientras está despierto; por eso también se sincroniza al abrir el proyecto.
 
+## 6d. Perfiles (roles) y asignación de proyectos
+
+Los usuarios se crean en **Administración** (solo tú, administrador). Hay cinco perfiles:
+
+| Perfil | Qué ve | Qué puede hacer |
+|---|---|---|
+| **Administrador** | Todo | Todo: crea y borra proyectos, asigna, administra usuarios y respaldos |
+| **PMO** | Todo (incluida la bitácora) | Solo lectura |
+| **PMO líder** | Solo los proyectos donde está asignado; **sin bitácora** | Solo lectura |
+| **Analista QA** | Solo los proyectos que tiene asignados (backlog y en pruebas) y **su propia bitácora** | Edita todo (seguimiento, criterios, pruebas, bitácora, ambientes, comentarios). **No** crea ni borra proyectos |
+| **PO** | Solo el % de entrega y el % de avance de QA de sus proyectos | Deja comentarios (hilo por proyecto) y reporta fallas en Ambientes. No edita nada más |
+
+* Al **cargar un proyecto** el administrador debe elegir el **PMO líder**, el **analista QA** (quien lo aprueba y prueba) y el **PO**. Se puede cambiar después en el panel «Asignación» del detalle del proyecto.
+* **Los proyectos que ya existían no tienen asignación**: solo el administrador y la PMO los ven hasta que los asignes (abre cada proyecto → «Asignación» → Guardar).
+* Crea primero los usuarios (los 5 PMO líderes, los 4 analistas, los PO y la PMO) con su perfil; si no existe al menos uno de cada perfil, no se pueden cargar proyectos nuevos.
+* Todo se valida en el servidor, no solo en la pantalla: aunque alguien manipule el navegador, su perfil no puede leer ni escribir lo que no le corresponde.
+* Si cambias el perfil de alguien, su sesión se actualiza sola en el siguiente movimiento.
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.

@@ -24,14 +24,14 @@
   <div id="bkBanner"></div>
 
   <section class="card"><h2>Usuarios</h2>
-    <p class="small" style="margin:0">Cada analista entra con su usuario y contraseña. Al crear o restablecer una clave, la persona debe cambiarla en su primer ingreso.</p>
+    <p class="small" style="margin:0">Cada analista entra con su usuario y contraseña. Al crear o restablecer una clave, la persona debe cambiarla en su primer ingreso. <b>Perfiles:</b> Administrador (todo) · PMO (ve todo, sin editar) · PMO líder (solo sus proyectos, sin editar ni bitácora) · Analista QA (sus proyectos, edita; no crea ni borra proyectos) · PO (ve el avance de sus proyectos, comenta y reporta fallas de ambientes). Los proyectos se asignan al crearlos (o después, en el detalle del proyecto).</p>
     <div class="tbl"><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Último ingreso</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
     <h3 style="font-size:14px;margin-top:20px">Nuevo usuario</h3>
     <form id="fNew" class="row" autocomplete="off">
       <div><label for="nu">Usuario</label><input id="nu" placeholder="ej. jperez" required></div>
       <div><label for="nn">Nombre completo</label><input id="nn" placeholder="Juan Pérez" required></div>
       <div><label for="np">Contraseña temporal</label><input id="np" type="text" placeholder="mín. 10, letras y números" required></div>
-      <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista</option><option value="admin">Administrador</option></select></div>
+      <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista QA</option><option value="po">PO</option><option value="pmo_lider">PMO líder</option><option value="pmo">PMO</option><option value="admin">Administrador</option></select></div>
       <div><button class="primary" type="submit" style="width:100%">Crear usuario</button></div>
     </form>
     <div class="msg" id="msgU"></div>
@@ -68,6 +68,7 @@ async function api(method, url, body){
 }
 const fmt = s => s ? new Date(s).toLocaleString('es-CO', { dateStyle:'medium', timeStyle:'short' }) : '—';
 let me = null;
+const ROLES = { admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO' };
 
 async function loadMe(){
   me = await api('GET', '/api/me');
@@ -81,10 +82,10 @@ async function loadUsers(){
   const us = await api('GET', '/api/admin/users');
   $('users').innerHTML = us.map(u => `<tr>
     <td><strong>${esc(u.username)}</strong></td><td>${esc(u.name)}</td>
-    <td><span class="pill ${u.role === 'admin' ? 'adm' : ''}">${u.role === 'admin' ? 'Administrador' : 'Analista'}</span></td>
+    <td><select data-a="role" data-id="${u.id}" aria-label="Perfil de ${esc(u.username)}">${Object.keys(ROLES).map(k => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${ROLES[k]}</option>`).join('')}</select></td>
     <td><span class="pill ${u.active ? 'on' : 'off'}">${u.active ? 'Activo' : 'Inactivo'}</span>${u.must_change ? ' <span class="pill">cambio pendiente</span>' : ''}</td>
     <td>${fmt(u.last_login)}</td>
-    <td style="white-space:nowrap"><button data-a="pw" data-id="${u.id}">Restablecer clave</button><button data-a="act" data-id="${u.id}" data-v="${u.active ? 0 : 1}">${u.active ? 'Desactivar' : 'Activar'}</button><button data-a="role" data-id="${u.id}" data-v="${u.role === 'admin' ? 'analista' : 'admin'}">${u.role === 'admin' ? 'Quitar admin' : 'Hacer admin'}</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button data-a="pw" data-id="${u.id}">Restablecer clave</button><button data-a="act" data-id="${u.id}" data-v="${u.active ? 0 : 1}">${u.active ? 'Desactivar' : 'Activar'}</button></td></tr>`).join('');
 }
 $('users').addEventListener('click', async e => {
   const b = e.target.closest('button'); if(!b) return;
@@ -100,6 +101,12 @@ $('users').addEventListener('click', async e => {
     }
     await loadUsers();
   }catch(err){ say('msgU', err.message, 'err'); }
+});
+$('users').addEventListener('change', async e => {
+  const sel = e.target.closest('select[data-a="role"]'); if(!sel) return;
+  say('msgU', '');
+  try{ await api('PATCH', '/api/admin/users/' + sel.dataset.id, { role: sel.value }); say('msgU', 'Perfil actualizado. Si la persona tiene la sesión abierta, se le actualiza sola.', 'ok'); await loadUsers(); }
+  catch(err){ say('msgU', err.message, 'err'); await loadUsers(); }
 });
 $('fNew').addEventListener('submit', async e => {
   e.preventDefault(); say('msgU', '');

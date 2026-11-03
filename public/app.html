@@ -456,7 +456,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js?v=20261028"></script>
+<script src="/shim.js?v=20261029"></script>
 <script>
 (function(){
 'use strict';
@@ -1617,7 +1617,7 @@ let selectedProjectId = null;
 let mode = null;          // null | 'edit' | 'cert'  (en el detalle de un proyecto)
 let work = null;          // copia de trabajo de historias al editar pesos
 let certDraft = null;     // { historias, bugs, fileName, pasted, status, summary }
-const newDraft = () => ({ testStart:'', figma:[], figUrl:'', figTitulo:'', figError:'', name:'', file:null, fileName:'', historias:[], analyzing:false, error:null, diasPlan:null, diasTouched:false, estAI:null, estLoading:false, estError:null });
+const newDraft = () => ({ asig:{}, testStart:'', figma:[], figUrl:'', figTitulo:'', figError:'', name:'', file:null, fileName:'', historias:[], analyzing:false, error:null, diasPlan:null, diasTouched:false, estAI:null, estLoading:false, estError:null });
 let draft = newDraft();
 let qaEdit = null;   // edición del plazo de pruebas en el detalle del proyecto
 const openDetails = new Set();
@@ -1634,7 +1634,7 @@ let pruForm = null, azFilt = {}, tpForm = null;
 let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
-const local = { projects:new Map(), analistas:new Map(), bitacora:new Map(), config:new Map(), seguimiento:new Map(), amb_hojas:new Map(), amb_hist:new Map() };
+const local = { projects:new Map(), analistas:new Map(), bitacora:new Map(), config:new Map(), seguimiento:new Map(), amb_hojas:new Map(), amb_hist:new Map(), comentarios:new Map() };
 let pendingRender = false;
 function newSegForm(tipo, fecha){ return { tipo:tipo||'stopper', fecha:fecha||ymd(new Date()), hu:'', crit:'', bugId:'', texto:'', nuevoTexto:'', codigo:'', desc:'', peso:'', criterios:'', pendiente:true, prio:'', prioNombre:'', ambiente:'', hIni:'', hFin:'', issue:'', casosDis:'', casosOk:'', aspectos:CQ_ASPECTOS, planId:'', suiteId:'', planUrl:'', appAmb:'', bancaUrl:'', iterApp:'', iterBanca:'', bDef:'', bMej:'', bPro:'', bAmb:'', bUx:'', bFun:'', resultado:'' }; }
 let seg = newSegForm();
@@ -1683,6 +1683,8 @@ function ingest(col, list){
     ambGenerales = list.find(d => d.tipo==='catalogo') || null;
   } else if(col==='amb_hist'){
     ambHist = list;
+  } else if(col==='comentarios'){
+    comentarios = list.map(d => JSON.parse(JSON.stringify(d)));
   } else if(col==='azure_bugs'){
     azBugs = new Map(list.map(d => [d.id, JSON.parse(JSON.stringify(d))]));
   }
@@ -2086,9 +2088,8 @@ ${text}
 }
 
 /* ================= render base ================= */
-const TABS = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','Cerrados'],['nuevo','Nuevo proyecto'],['azure','Azure y ANS'],['bitacora','Bitácora diaria'],['ambientes','Ambientes']];
 function renderTabs(){
-  $('#tabs').innerHTML = TABS.map(([id,label]) =>
+  $('#tabs').innerHTML = tabsForRole().map(([id,label]) =>
     `<button class="tab ${currentView===id?'active':''}" data-act="tab" data-tab="${id}" type="button">${label}${id==='cerrados' && projects.some(isClosed) ? ' (' + projects.filter(isClosed).length + ')' : ''}${id==='ambientes' && ambOpenCount() ? ' (' + ambOpenCount() + ' ⚠)' : ''}</button>`).join('');
 }
 function renderStatusBanner(){
@@ -2106,6 +2107,7 @@ function focusSel(el){
 }
 function render(){
   pendingRender = false;
+  if(!tabAllowed(currentView)){ currentView = defaultView(); selectedProjectId = null; fullSegId = null; }
   renderTabs();
   const app = $('#app');
   const ae = document.activeElement;
@@ -2120,7 +2122,9 @@ function render(){
   else if(currentView==='azure') html = viewAzure();
   else if(currentView==='bitacora') html = viewBitacora();
   else if(currentView==='ambientes') html = viewAmbientes();
+  else if(currentView==='po') html = viewPO();
   app.innerHTML = html;
+  applyRoleUI();
   window.scrollTo(0, y);
   if(fsel){ const el = $(fsel, app); if(el){ el.focus({preventScroll:true}); try{ if(pos) el.setSelectionRange(pos[0], pos[1]); }catch(e){} } }
 }
@@ -2201,7 +2205,7 @@ function viewTablero(){
     ${bitPanel}
     ${ambTableroPanel()}
     <div class="panel"><div class="panel-head"><div><h2>Proyectos</h2><p class="hint">Vista consolidada del equipo</p></div><button class="btn btn-primary btn-sm" data-act="tab" data-tab="nuevo" type="button">+ Nuevo proyecto</button></div>
-      ${projects.some(p => !isClosed(p)) ? projectListRows(projects.filter(p => !isClosed(p)).slice(0,6)) : `<div class="empty">${projects.length ? 'No hay proyectos en curso; los certificados están en la pestaña Cerrados.' : 'Todavía no hay proyectos. Crea el primero desde “Nuevo proyecto”.'}</div>`}</div>`;
+      ${projects.some(p => !isClosed(p)) ? projectListRows(projects.filter(p => !isClosed(p)).slice(0,6)) : `<div class="empty">${projects.length ? 'No hay proyectos en curso; los certificados están en la pestaña Cerrados.' : (isAdmin() ? 'Todavía no hay proyectos. Crea el primero desde “Nuevo proyecto”.' : 'Todavía no tienes proyectos asignados.')}</div>`}</div>`;
 }
 function stopperOpenCount(pid){ return segs.filter(e => e.projectId===pid && e.tipo==='stopper' && e.estado!=='resuelto').length; }
 function delBox(id){
@@ -2276,7 +2280,7 @@ function projectListRows(list, withDelete){
     const pct = projectProgress(p), so = stopperOpenCount(p.id), fzc = freezeInfo(segs.filter(e => e.projectId===p.id), ymd(new Date()));
     return `<div class="projectcard" data-act="open-project" data-id="${escapeHtml(p.id)}" role="button" tabindex="0">
       <div class="top"><div><h3>${escapeHtml(p.name)}</h3>
-      <div class="meta">${(p.historias||[]).length} HU · cargado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')}${p.recibidoEn && !p.recibidoAntes ? ' · recibido ' + fmtDay(p.recibidoEn) : ''} ${badgeStatus(p)} ${fzc.frozen ? `<span class="badge badge-parcial"><span class="dot"></span>❄ Congelado · ${escapeHtml(fzc.current.prio||'otra prioridad')}</span>` : ''} ${so ? `<span class="badge ans-incumple"><span class="dot"></span>${so} stopper abierto${so>1?'s':''}</span>` : ''} ${clockBadge(testClock(p, segs.filter(e => e.projectId===p.id), ymd(new Date())))}</div></div>
+      <div class="meta">${(p.historias||[]).length} HU · cargado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')}${p.recibidoEn && !p.recibidoAntes ? ' · recibido ' + fmtDay(p.recibidoEn) : ''}${asigInline(p)} ${badgeStatus(p)} ${fzc.frozen ? `<span class="badge badge-parcial"><span class="dot"></span>❄ Congelado · ${escapeHtml(fzc.current.prio||'otra prioridad')}</span>` : ''} ${so ? `<span class="badge ans-incumple"><span class="dot"></span>${so} stopper abierto${so>1?'s':''}</span>` : ''} ${clockBadge(testClock(p, segs.filter(e => e.projectId===p.id), ymd(new Date())))}</div></div>
       <div class="pct">${fmtPct(pct)}</div></div>
       <div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
       ${withDelete ? `<div class="flexend" style="margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar</button></div>${delBox(p.id)}` : ''}</div>`;
@@ -2286,7 +2290,7 @@ function viewProyectos(){
   const open = projects.filter(p => !isClosed(p)), nClosed = projects.length - open.length;
   return `<div class="panel"><div class="panel-head"><div><h2>Proyectos</h2><p class="hint">${open.length} en curso${nClosed ? ' · ' + nClosed + ' cerrado' + (nClosed>1?'s':'') + ' en la pestaña Cerrados' : ''}</p></div>
     <button class="btn btn-primary btn-sm" data-act="tab" data-tab="nuevo" type="button">+ Nuevo proyecto</button></div>
-    ${open.length ? projectListRows(open, true) : `<div class="empty">${projects.length ? 'No hay proyectos en curso. Los certificados están en la pestaña Cerrados.' : 'Todavía no hay proyectos.'}</div>`}</div>`;
+    ${open.length ? projectListRows(open, true) : `<div class="empty">${projects.length ? 'No hay proyectos en curso. Los certificados están en la pestaña Cerrados.' : (isAdmin() ? 'Todavía no hay proyectos.' : 'Todavía no tienes proyectos asignados.')}</div>`}</div>`;
 }
 /* ---- pestaña Cerrados ---- */
 function closedCard(p){
@@ -2447,6 +2451,7 @@ function viewProjectDetail(){
     <div style="text-align:right"><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div></div></div>
     <div class="progress ${done?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
+  body += asigPanel(p);
   body += recepcionPanel(p);
   body += qaClockPanel(p);
   body += pruebasPanel(p);
@@ -2464,6 +2469,7 @@ function viewProjectDetail(){
   else if(isClosed(p)) body += `<div class="panel">${novedadesBriefHtml(p)}</div>`;
   else if(done) body += certificationPanel(p);
   else body += `<div class="panel"><div class="banner banner-info"><span>ℹ️</span><span>Cuando el proyecto llegue al 100% se habilita la certificación: se traen los bugs del proyecto (export de Azure Boards), se calculan los ANS y el índice de calidad.</span></div></div>`;
+  body += comentariosPanel(p);
   return body;
 }
 
@@ -2765,7 +2771,7 @@ function certificationSummary(p){
 /* ================= NUEVO PROYECTO ================= */
 function createState(){
   const v = validateWeights(draft.historias);
-  return { v, can: draft.name.trim().length>0 && v.ok && !draft.analyzing };
+  return { v, can: draft.name.trim().length>0 && v.ok && !draft.analyzing && asigNewOk() };
 }
 function createHintText(v){
   if(draft.analyzing) return 'Analizando documento…';
@@ -2773,6 +2779,7 @@ function createHintText(v){
   if(!draft.historias.length) return 'Agrega al menos una historia de usuario.';
   if(!v.huOk) return 'El peso de las HU debe sumar 100%.';
   if(v.bad.length) return 'Los criterios de ' + v.bad.map(b => b.codigo).join(', ') + ' deben sumar 100%.';
+  if(!asigNewOk()) return 'Elige el PMO líder, el analista QA y el PO del proyecto.';
   return '';
 }
 
@@ -2799,6 +2806,7 @@ function viewNuevo(){
   const st = createState();
   return `<div class="panel"><div class="panel-head"><div><h2>Nuevo proyecto</h2><p class="hint">Sube el requerimiento (Excel, PDF, Word, PowerPoint, texto o imagen) y la IA detecta las historias de usuario con sus criterios, o agrégalas manualmente.</p></div></div>
     <div style="margin-bottom:14px;"><label class="field-label" for="projNameInput">Nombre del proyecto</label><input type="text" id="projNameInput" data-f="projName" value="${escapeHtml(draft.name)}" placeholder="Ej. FinanFast Vehículo — Fase 2" /></div>
+    ${asigNewHtml()}
     <div class="rowgrid"><div><label class="field-label">Archivo de requerimiento</label>
         ${fileSlot('req', draft.fileName)}</div>
       <div><label class="field-label">&nbsp;</label>
@@ -3182,6 +3190,199 @@ function viewBitacora(){
       <div class="panel"><div class="seg" style="margin-bottom:14px;"><button type="button" class="${bit.view==='dia'?'on':''}" data-act="bit-view" data-v="dia">Día</button><button type="button" class="${bit.view==='semana'?'on':''}" data-act="bit-view" data-v="semana">Semana</button></div>
         ${bit.view==='dia' ? dayViewHtml(a) : weekViewHtml(a)}</div></div>
     ${monthSummaryHtml()}`;
+}
+
+/* ================= ROLES (la validación real está en el servidor; aquí solo se adapta la pantalla) =================
+   admin: todo · pmo: ve todo, no edita · pmo_lider: solo sus proyectos, no edita, sin bitácora
+   analista: sus proyectos, edita todo menos crear/borrar proyectos · po: % de entrega y de QA, comenta y reporta ambientes.
+   Sin servidor (artifact) no hay sesión: se comporta como administrador. */
+const ROLE_LABELS = {admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO'};
+let comentarios = [], roster = null, asigForm = null;
+const pcomDraft = {};
+function ME(){ return (window.__me && window.__me.user) || null; }
+function ROLE(){ const m = ME(); return m ? m.role : 'admin'; }
+function isAdmin(){ return ROLE()==='admin'; }
+function canEdit(){ const r = ROLE(); return r==='admin' || r==='analista'; }
+function canComment(){ const r = ROLE(); return r==='admin' || r==='analista' || r==='po'; }
+
+const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','Cerrados'],['nuevo','Nuevo proyecto'],['azure','Azure y ANS'],['bitacora','Bitácora diaria'],['ambientes','Ambientes']];
+function tabsForRole(){
+  const r = ROLE();
+  if(r==='po') return [['po','Mis proyectos'],['ambientes','Ambientes']];
+  const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo']})[r] || [];
+  return TABS_ALL.filter(t => hide.indexOf(t[0])<0);
+}
+function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
+function defaultView(){ return ROLE()==='po' ? 'po' : 'tablero'; }
+
+/* Acciones y campos permitidos a los perfiles de solo lectura */
+const RO_ACTS = new Set(['tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
+const RO_FIELDS = new Set(['ambQ','azfEst','azfPri','az','pcom']);
+const ANALYST_BLOCK = new Set(['create','del-ask','del-yes','del-cancel','bit-add-analyst','asig-save']);
+function roleAllowsAct(act){
+  const r = ROLE();
+  if(r==='admin') return true;
+  if(r==='analista') return !ANALYST_BLOCK.has(act);
+  return RO_ACTS.has(act);
+}
+function roleAllowsField(f){
+  const r = ROLE();
+  if(r==='admin') return true;
+  if(r==='analista') return f!=='newAnalyst' && f!=='draftAsig' && f!=='asig';
+  return RO_FIELDS.has(f) || (r==='po' && f==='ambEst');
+}
+function roleDenied(){
+  const r = ROLE();
+  toast(r==='po' ? 'Tu perfil (PO) solo puede ver el avance, comentar y reportar fallas de ambientes.' : r==='analista' ? 'Esta acción es solo del administrador.' : 'Tu perfil es de solo lectura.');
+}
+/* Pasada visual tras cada render: oculta lo que el perfil no puede usar. */
+function applyRoleUI(){
+  const r = ROLE(); if(r==='admin') return;
+  const app = $('#app'); if(!app) return;
+  const keep = new Set();
+  $$('[data-act]', app).forEach(el => {
+    const a = el.dataset.act;
+    if(a==='tab' && !tabAllowed(el.dataset.tab)){ el.remove(); return; }
+    if(roleAllowsAct(a)) return;
+    if(/^(BUTTON|LABEL|A)$/.test(el.tagName)) el.remove();
+  });
+  $$('.dropzone, label[for]', app).forEach(el => { if(!canEdit()) el.remove(); });
+  $$('input, select, textarea', app).forEach(el => {
+    const f = el.dataset && el.dataset.f;
+    if(!f || !roleAllowsField(f)) el.disabled = true;
+  });
+  if(r==='po') $$('.chipbtn[data-act="amb-tab"][data-t="config"]', app).forEach(el => el.remove());
+  if(r==='po') $$('.incbody', app).forEach(el => { el.innerHTML = '<div class="small">QA recibe tu reporte y se encarga del Issue en Azure DevOps y del aviso por correo.</div>'; });
+}
+
+/* ---- asignación de proyectos (PMO líder, analista QA, PO) ---- */
+const ASIG_KEYS = [['pmoLider','PMO líder','pmo_lider'],['analista','Analista QA','analista'],['po','PO','po']];
+function asigInline(p){
+  const a = p && p.asignacion; if(!a) return '';
+  const bits = ASIG_KEYS.filter(k => a[k[0]] && a[k[0]].name).map(k => k[1] + ': ' + a[k[0]].name);
+  return bits.length ? ' · ' + bits.map(escapeHtml).join(' · ') : '';
+}
+function asigOptions(role, cur){
+  const us = (roster || []).filter(u => u.role===role);
+  if(cur && cur.id!=null && !us.some(u => String(u.id)===String(cur.id))) us.push({id:cur.id, name:cur.name + ' (inactivo)', role});
+  return us;
+}
+function asigNewHtml(){
+  if(!roster) return '';
+  const sel = ([k, label, role]) => {
+    const us = asigOptions(role);
+    return `<div><label class="field-label">${label}</label>${us.length
+      ? `<select data-f="draftAsig" data-k="${k}"><option value="">Elige…</option>${us.map(u => `<option value="${escapeHtml(String(u.id))}" ${String(draft.asig[k]||'')===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}</select>`
+      : `<div class="small" style="color:var(--critical);">No hay usuarios con el perfil «${ROLE_LABELS[role]}». Créalos en Administración y vuelve aquí.</div>`}</div>`;
+  };
+  return `<div style="margin-bottom:14px;"><div class="rowgrid g3">${ASIG_KEYS.map(sel).join('')}</div>
+    <p class="small" style="margin:6px 0 0;">Solo estas personas verán el proyecto (además del administrador y la PMO). El analista QA es quien lo aprueba y lo prueba.</p></div>`;
+}
+function asigNewOk(){ return !roster || ASIG_KEYS.every(k => draft.asig && draft.asig[k[0]]); }
+function asigFromIds(ids){
+  const out = {};
+  for(const [k,,role] of ASIG_KEYS){ const u = (roster || []).find(x => String(x.id)===String(ids[k])); if(!u) return null; out[k] = {id:u.id, name:u.name}; }
+  return out;
+}
+function asigPanel(p){
+  const a = p.asignacion || null;
+  if(isAdmin() && roster){
+    const f = asigForm && asigForm.pid===p.id ? asigForm : null;
+    const val = k => f ? (f[k]||'') : (a && a[k] ? String(a[k].id) : '');
+    const complete = ASIG_KEYS.every(k => val(k[0]));
+    const changed = !!f && ASIG_KEYS.some(k => String(f[k[0]]||'') !== (a && a[k[0]] ? String(a[k[0]].id) : ''));
+    const sel = ([k, label, role]) => `<div><label class="field-label">${label}</label><select data-f="asig" data-k="${k}"><option value="">Elige…</option>${asigOptions(role, a && a[k]).map(u => `<option value="${escapeHtml(String(u.id))}" ${val(k)===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}</select></div>`;
+    return `<div class="panel"><div class="panel-head"><div><h2>Asignación</h2><p class="hint">${a ? 'Quién ve y trabaja este proyecto.' : 'Este proyecto no tiene asignación: solo el administrador y la PMO lo ven. Asígnalo para que el PMO líder, el analista y el PO lo vean.'}</p></div>
+      <button class="btn btn-sm btn-primary" data-act="asig-save" type="button" ${complete && changed ? '' : 'disabled'}>Guardar asignación</button></div>
+      <div class="rowgrid g3">${ASIG_KEYS.map(sel).join('')}</div></div>`;
+  }
+  if(!a) return '';
+  return `<div class="panel tight"><div class="small"><strong>Asignación</strong>${asigInline(p)}</div></div>`;
+}
+
+/* ---- comentarios por proyecto (hilo) ---- */
+function comentariosOf(pid){ return comentarios.filter(c => c.projectId===pid).sort((a,b) => String(a.ts||'~').localeCompare(String(b.ts||'~'))); }
+function comentHtml(p){
+  const list = comentariosOf(p.id), me = ME();
+  const items = list.map(c => `<div class="seg-entry" style="margin-bottom:8px;"><div class="sh"><span><strong>${escapeHtml(c.autor||'—')}</strong> <span class="small">${escapeHtml(c.rol||'')}${c.ts ? ' · ' + fmtDateTime(c.ts) : ''}${c.editedAt ? ' · editado' : ''}</span></span>${c.id && ((me && c.autorId===me.id) || isAdmin()) ? `<button class="btn btn-sm btn-ghost" data-act="pcom-del" data-id="${escapeHtml(p.id)}" data-cid="${escapeHtml(c.id)}" type="button" aria-label="Borrar comentario">🗑</button>` : ''}</div><div class="sb" style="white-space:pre-wrap;">${escapeHtml(c.texto||'')}</div></div>`).join('');
+  const form = canComment() ? `<div style="margin-top:10px;"><label class="field-label" for="pcom-${escapeHtml(p.id)}">Nuevo comentario</label><textarea id="pcom-${escapeHtml(p.id)}" data-f="pcom" data-pid="${escapeHtml(p.id)}" rows="2" placeholder="Escribe tu comentario…">${escapeHtml(pcomDraft[p.id]||'')}</textarea>
+    <div class="flexend"><button class="btn btn-sm btn-primary" data-act="pcom-add" data-id="${escapeHtml(p.id)}" type="button">Publicar comentario</button></div></div>` : '';
+  return (items || '<div class="small">Aún no hay comentarios.</div>') + form;
+}
+function comentariosPanel(p){
+  return `<div class="panel"><div class="panel-head"><div><h2>Comentarios del proyecto</h2><p class="hint">Hilo compartido entre el analista QA, el PO y el administrador.</p></div></div>${comentHtml(p)}</div>`;
+}
+async function pcomAdd(pid){
+  const t = String(pcomDraft[pid]||'').trim(); if(!t){ toast('Escribe el comentario.'); return; }
+  let ok = false;
+  await guarded(async () => { await stAdd('comentarios', {projectId:pid, texto:t}); ok = true; }, 'Comentario publicado');
+  if(ok) pcomDraft[pid] = '';
+  render();
+}
+async function pcomDel(cid){
+  await guarded(() => stDel('comentarios', cid), 'Comentario borrado');
+  render();
+}
+
+/* ---- vista del PO: % de entrega, % de avance de QA y comentarios ---- */
+function qaInfo(p){
+  const d = azBugs.get(p.id);
+  if(p.azureTest && d && d.tests && d.tests.counts){
+    const t = d.tests;
+    return {src:'azure', at:t.syncedAt, c:pruCalc({total:t.total, na:t.counts.na, ok:t.counts.ok, fail:t.counts.fail, block:t.counts.block, pause:t.counts.pause})};
+  }
+  if(p.pruebas) return {src:'manual', at:p.pruebas.at, c:pruCalc(p.pruebas)};
+  return null;
+}
+function poCard(p){
+  const pct = projectProgress(p), qi = qaInfo(p), c = qi && qi.c.valid ? qi.c : null;
+  const qa = c
+    ? `<div class="pru-big num">${fmtPct(c.cert)}</div><div class="small">QA certificado (exitosos / casos aplicables)</div><div class="progress"><div style="width:${clamp(c.cert,0,100)}%"></div></div>
+       <p class="small" style="margin:8px 0 0;">Probado: <strong>${c.ok + c.fail} de ${c.base}</strong> (${fmtPct(c.probado)})${c.exito!=null ? ' · éxito sobre lo probado: <strong>' + fmtPct(c.exito) + '</strong>' : ''} · fallidos ${c.fail} · bloqueados ${c.block} · pendientes ${c.pend}${qi.at ? ' · actualizado ' + fmtDateTime(qi.at) : ''}</p>`
+    : `<div class="small">Aún no hay avance de pruebas registrado.</div>`;
+  return `<div class="panel"><div class="panel-head"><div><h2>${escapeHtml(p.name)}</h2><p class="hint">${badgeStatus(p)}${asigInline(p)}</p></div></div>
+    <div class="rowgrid"><div><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div><div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div></div>
+      <div>${qa}</div></div>
+    <details style="margin-top:12px;" data-key="pcom:${escapeHtml(p.id)}" ${openDetails.has('pcom:' + p.id) ? 'open' : ''}><summary><strong>Comentarios (${comentariosOf(p.id).length})</strong></summary><div style="margin-top:8px;">${comentHtml(p)}</div></details></div>`;
+}
+function viewPO(){
+  if(!projects.length) return `<div class="panel"><div class="empty">Todavía no tienes proyectos asignados. Cuando el administrador te asigne uno, aquí verás su avance.</div></div>`;
+  const act = projects.filter(p => !isClosed(p)), cer = projects.filter(isClosed);
+  return `<div class="panel tight"><div class="small">${act.length} proyecto${act.length===1?'':'s'} en curso${cer.length ? ' · ' + cer.length + ' cerrado' + (cer.length===1?'':'s') : ''}. Puedes comentar en cada uno y reportar fallas de ambientes en la pestaña Ambientes.</div></div>
+    ${act.map(poCard).join('')}${cer.length ? `<h3 style="margin:18px 0 8px;">Cerrados</h3>${cer.map(poCard).join('')}` : ''}`;
+}
+
+/* ---- ganchos desde onClick / onInput / onChange ---- */
+async function loadRoster(){
+  if(!isAdmin() || !window.__me || !window.claude || !window.claude.use) return;
+  try{ const rn = await window.claude.use('roster'); roster = rn ? await rn() : null; }catch(e){ roster = null; }
+}
+function roleClick(act, el){
+  switch(act){
+    case 'pcom-add': pcomAdd(el.dataset.id); return true;
+    case 'pcom-del': pcomDel(el.dataset.cid); return true;
+    case 'asig-save': {
+      const p = currentProject(); if(!p || !asigForm || asigForm.pid!==p.id) return true;
+      const a = asigFromIds(asigForm); if(!a){ toast('Elige el PMO líder, el analista QA y el PO.'); return true; }
+      asigForm = null;
+      patchProject(np => { np.asignacion = a; }).then(() => toast('Asignación guardada'));
+      return true;
+    }
+  }
+  return false;
+}
+function roleInput(f, el){
+  if(f==='pcom'){ pcomDraft[el.dataset.pid] = el.value; return true; }
+  return false;
+}
+function roleChange(f, el){
+  if(f==='draftAsig'){ draft.asig = draft.asig || {}; draft.asig[el.dataset.k] = el.value; updateCreateButton(); return true; }
+  if(f==='asig'){
+    const p = currentProject(); if(!p) return true;
+    if(!asigForm || asigForm.pid!==p.id){ const a = p.asignacion || {}; asigForm = {pid:p.id}; ASIG_KEYS.forEach(k => { asigForm[k[0]] = a[k[0]] ? String(a[k[0]].id) : ''; }); }
+    asigForm[el.dataset.k] = el.value; render(); return true;
+  }
+  return false;
 }
 
 /* ================= informe PDF de certificación ================= */
@@ -3844,7 +4045,7 @@ function refreshDerived(scope){
 }
 async function guarded(fn, okMsg){
   try{ await fn(); if(okMsg) toast(okMsg); }
-  catch(e){ console.error(e); toast(e && e.code==='quota_exceeded' ? 'No hay cupo en la base de datos compartida.' : 'No se pudo guardar. Intenta de nuevo.'); }
+  catch(e){ console.error(e); toast(e && e.code==='quota_exceeded' ? 'No hay cupo en la base de datos compartida.' : (e && e.message && (e.status===400 || e.status===403) ? e.message : 'No se pudo guardar. Intenta de nuevo.')); }
 }
 async function patchProject(patchFn){
   const p = currentProject(); if(!p) return;
@@ -3865,6 +4066,7 @@ async function createProject(){
   const data = cloneJ({ name:draft.name.trim(), createdAt:new Date().toISOString(), createdBy:whoName(), status:'activo', historias:draft.historias, alcanceInicial:{hu:draft.historias.length, criterios:draft.historias.reduce((s,h) => s + (h.criterios||[]).length, 0)},
     estDias: est.dias || null, estFuente: est.fuente, estRazon: est.ai ? est.ai.razon : '', diasPlan: dp>0 ? Math.round(dp) : null, testStart: /^\d{4}-\d{2}-\d{2}$/.test(draft.testStart||'') ? draft.testStart : null, recepcion:'backlog', recibidoEn:null });
   if((draft.figma||[]).length) data.figma = cloneJ(draft.figma);
+  if(roster){ const a = asigFromIds(draft.asig || {}); if(!a){ toast('Elige el PMO líder, el analista QA y el PO del proyecto.'); return; } data.asignacion = a; }
   let id = null;
   await guarded(async () => { id = await stAdd('projects', data); });
   if(!id) return;
@@ -4380,9 +4582,13 @@ function onClick(e){
   if(t.id==='howItWorksBtn'){ $('#howDialog').showModal(); return; }
   if(t.id==='closeHowDialog'){ $('#howDialog').close(); return; }
   const dz = t.closest && t.closest('.dropzone');
+  if(dz && !canEdit()) return;
   if(dz){ const inp = $(dz.dataset.drop==='bug' ? '#bugFileInput' : '#fileInput'); if(inp) inp.click(); return; }
   const el = t.closest && t.closest('[data-act]'); if(!el || el.disabled) return;
   const act = el.dataset.act;
+  if(!roleAllowsAct(act) || (act==='tab' && !tabAllowed(el.dataset.tab))){ if(act!=='tab') roleDenied(); return; }
+  if(act==='tab' && el.dataset.tab==='nuevo') loadRoster().then(() => { if(currentView==='nuevo') render(); });
+  if(roleClick(act, el)) return;
   if(act.indexOf('amb-')===0){ ambClick(act, el); return; }
   const sc = el.closest('[data-scope]');
   const scope = el.dataset.scope || (sc && sc.dataset.scope);
@@ -4536,6 +4742,8 @@ function onClick(e){
 }
 function onInput(e){
   const el = e.target, f = el.dataset && el.dataset.f; if(!f) return;
+  if(!roleAllowsField(f)) return;
+  if(roleInput(f, el)) return;
   if(f.indexOf('amb')===0){ ambInput(f, el); return; }
   if(el.tagName==='SELECT' || el.type==='checkbox') return;   // se manejan en 'change'
   const scope = el.dataset.scope, hi = el.dataset.hu!=null ? Number(el.dataset.hu) : null, ci = el.dataset.c!=null ? Number(el.dataset.c) : null;
@@ -4576,12 +4784,15 @@ function onInput(e){
 }
 function onChange(e){
   const el = e.target;
+  if(el.type==='file' && !canEdit()) return;
   if(el.id==='fileInput' && el.files[0]){ draft.file = el.files[0]; draft.fileName = el.files[0].name; draft.error = null; render(); return; }
   if(el.id==='figFileDraft' && el.files.length){ const fs = Array.from(el.files); el.value = ''; fs.forEach(f => draft.figma.push(figEntry({tipo:'archivo', nombre:f.name, tamano:f.size, mime:f.type||'', titulo:draft.figTitulo.trim()}, true))); draft.figTitulo = ''; draft.figError = ''; render(); toast(fs.length + ' archivo(s) registrado(s)'); return; }
   if(el.id==='figFileProj' && el.files.length){ const fp = currentProject(); if(!fp) return; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); Array.from(el.files).forEach(f => figForm.files.push({name:f.name, size:f.size, type:f.type||''})); el.value = ''; render(); return; }
   if(el.id==='bugFileInput' && el.files[0]){ if(certDraft){ certDraft.file = el.files[0]; certDraft.fileName = el.files[0].name; certDraft.status = ''; render(); } return; }
   if(el.id==='ambFileInput' && el.files[0]){ const fl = el.files[0]; el.value = ''; ambImportFile(fl); return; }
   const f = el.dataset && el.dataset.f; if(!f) return;
+  if(!roleAllowsField(f)){ roleDenied(); return; }
+  if(roleChange(f, el)) return;
   if(f.indexOf('amb')===0){ ambChange(f, el); return; }
   if(el.tagName!=='SELECT' && el.type!=='checkbox') return;
   switch(f){
@@ -4635,7 +4846,9 @@ async function boot(){
   sampleAvailable = !!sampleNS;
   try{ dlNS = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; }catch(e){ dlNS = null; }
   /* Azure DevOps solo existe en la versión web, cuando el servidor tiene la llave configurada */
-  try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
+  try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use && ROLE()!=='po'){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
+  await loadRoster();
+  currentView = defaultView();
 
   const who = $('#whoInput');
   const saved = lsGet('qacert_who'); if(saved) who.value = saved;
@@ -4670,7 +4883,8 @@ async function boot(){
     sub('seguimiento', dbNS.collection('seguimiento').orderBy('ts','desc').limit(1000));
     sub('amb_hojas', dbNS.collection('amb_hojas').limit(30));
     sub('amb_hist', dbNS.collection('amb_hist').orderBy('fecha','desc').limit(1000));
-    if(azNS) sub('azure_bugs', dbNS.collection('azure_bugs').limit(400));
+    sub('comentarios', dbNS.collection('comentarios').orderBy('ts','asc').limit(3000));
+    if(azNS || ROLE()==='po') sub('azure_bugs', dbNS.collection('azure_bugs').limit(400));
   }
 }
 boot();

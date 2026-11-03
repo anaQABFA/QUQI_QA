@@ -7,6 +7,7 @@ const auth = require('./lib/auth');
 const store = require('./lib/store');
 const ai = require('./lib/ai');
 const azure = require('./lib/azure');
+const perm = require('./lib/perm');
 
 if (String(process.env.SESSION_SECRET || '').length < 32) { console.error('Falta SESSION_SECRET (mínimo 32 caracteres aleatorios).'); process.exit(1); }
 
@@ -86,6 +87,7 @@ app.use(wrap(async (req, res, next) => {
   next();
 }));
 const adminOnly = (req, res, next) => req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Solo administradores.' });
+const staffOnly = (req, res, next) => (req.user.role === 'admin' || req.user.role === 'analista') ? next() : res.status(403).json({ error: 'Tu perfil es de solo lectura.' });
 
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public/app.html')));
 app.get('/admin.html', (req, res) => req.user.role === 'admin' ? res.sendFile(path.join(__dirname, 'public/admin.html')) : res.redirect('/'));
@@ -98,7 +100,8 @@ async function backupInfo() {
 }
 app.get('/api/me', wrap(async (req, res) => {
   const u = req.user;
-  res.json({ user: { username: u.username, name: u.name, role: u.role, mustChange: u.must_change }, ai: { enabled: ai.enabled(), model: ai.enabled() ? ai.MODEL : null },
+  const mctx = u.must_change ? null : await ctxOf(req).catch(() => null);
+  res.json({ user: { id: u.id, username: u.username, name: u.name, role: u.role, roleLabel: perm.ROLE_LABEL[u.role] || u.role, mustChange: u.must_change, analystDocId: mctx ? mctx.analystDocId : null }, ai: { enabled: ai.enabled(), model: ai.enabled() ? ai.MODEL : null },
     azure: { enabled: azure.enabled(), org: azure.enabled() ? azure.org() : null, project: azure.defaultProject() || null, testProject: azure.testProject() || null, syncMinutes: azure.syncMinutes() },
     backup: u.role === 'admin' ? await backupInfo() : null });
 }));
@@ -113,15 +116,60 @@ app.post('/api/password', wrap(async (req, res) => {
 }));
 
 /* ---------- documentos + tiempo real (SSE) ---------- */
-const clients = new Set();
-function broadcast(ev) { const s = 'data: ' + JSON.stringify(ev) + '\n\n'; clients.forEach(c => { try { c.write(s); } catch (e) {} }); }
-app.get('/api/stream', (req, res) => {
+const clients = new Map();   // respuesta SSE -> contexto del usuario (cada quien recibe solo lo que puede ver)
+function broadcast(ev) {
+  let reassigned = false;
+  if (ev.op === 'set' && ev.col === 'projects') {
+    const before = JSON.stringify(perm.PA.get(ev.id) || null); perm.setPA(ev.id, ev.data);
+    reassigned = before !== JSON.stringify(perm.PA.get(ev.id) || null);
+  } else if (ev.op === 'del' && ev.col === 'projects') perm.PA.delete(ev.id);
+  clients.forEach((ctx, c) => {
+    let out = ev;
+    if (ev.op === 'set') {
+      const d = perm.readDoc(ctx, ev.col, ev.id, ev.data);
+      if (d == null) { if (ev.col === 'projects') out = { op: 'del', col: 'projects', id: ev.id }; else return; }
+      else if (d !== ev.data) out = Object.assign({}, ev, { data: d });
+    }
+    try { c.write('data: ' + JSON.stringify(out) + '\n\n'); } catch (e) {}
+  });
+  if (reassigned) clients.forEach((ctx, c) => { try { c.write('data: {"op":"resync"}\n\n'); } catch (e) {} });
+}
+
+/* Contexto del usuario: rol y, si es analista QA, su ficha de la bitácora (se crea o se enlaza por nombre la primera vez). */
+const analystJobs = new Map(), analystCache = new Map();
+const normN = x => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+async function analystDocFor(u) {
+  if (u.role !== 'analista') return null;
+  const cached = analystCache.get(u.id);
+  if (cached) { const d = await store.getDoc('analistas', cached); if (d && Number(d.data.userId) === u.id) return cached; analystCache.delete(u.id); }
+  if (analystJobs.has(u.id)) return analystJobs.get(u.id);
+  const job = (async () => {
+    const rows = await store.listDocs('analistas');
+    let hit = rows.find(r => r.data && Number(r.data.userId) === u.id);
+    if (!hit) {
+      const nn = normN(u.name); hit = rows.find(r => r.data && !r.data.userId && normN(r.data.name) === nn);
+      if (hit) { const d = await store.mergeDoc('analistas', hit.id, { userId: u.id }, 'sistema'); broadcast({ op: 'set', col: 'analistas', id: hit.id, data: d.data, version: d.version }); }
+    }
+    if (hit) return hit.id;
+    const nid = store.newId(), d = await store.setDoc('analistas', nid, { name: u.name, userId: u.id, createdAt: new Date().toISOString(), createdBy: 'sistema' }, 'sistema');
+    broadcast({ op: 'set', col: 'analistas', id: nid, data: d.data, version: d.version });
+    return nid;
+  })();
+  analystJobs.set(u.id, job);
+  try { const id = await job; analystCache.set(u.id, id); return id; } finally { analystJobs.delete(u.id); }
+}
+async function ctxOf(req) {
+  if (!req.ctx) req.ctx = { uid: req.user.id, role: req.user.role, name: req.user.name, analystDocId: await analystDocFor(req.user) };
+  return req.ctx;
+}
+app.get('/api/stream', wrap(async (req, res) => {
+  const ctx = await ctxOf(req);
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.write('retry: 3000\n\n');
-  clients.add(res);
+  clients.set(res, ctx);
   const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (e) {} }, 20000);
   req.on('close', () => { clearInterval(hb); clients.delete(res); });
-});
+}));
 /* azure_bugs solo se lee desde el navegador; únicamente el servidor lo escribe (al sincronizar con Azure DevOps). */
 const colOk = (req, res, next) => {
   const readOnly = req.params.col === 'azure_bugs' && req.method === 'GET';
@@ -129,40 +177,102 @@ const colOk = (req, res, next) => {
   return ok ? next() : res.status(400).json({ error: 'Colección o id inválido.' });
 };
 
-app.get('/api/docs/:col', colOk, wrap(async (req, res) => res.json(await store.listDocs(req.params.col))));
+/* Asignaciones del proyecto: PMO líder, analista QA y PO (usuarios activos con ese rol). */
+async function normAsig(a) {
+  if (!perm.isObj(a)) throw { status: 400, msg: 'Indica el PMO líder, el analista QA y el PO del proyecto.' };
+  const out = {};
+  for (const k of Object.keys(perm.ASSIGN_KEYS)) {
+    const id = parseInt(a[k] && (a[k].id != null ? a[k].id : a[k]), 10);
+    const u = Number.isInteger(id) ? (await db.q('SELECT id, name, role, active FROM users WHERE id=$1', [id])).rows[0] : null;
+    if (!u || !u.active || u.role !== perm.ASSIGN_KEYS[k]) throw { status: 400, msg: 'Elige un usuario activo con el perfil «' + perm.ROLE_LABEL[perm.ASSIGN_KEYS[k]] + '» para ' + (k === 'pmoLider' ? 'PMO líder' : k === 'analista' ? 'analista QA' : 'PO') + '.' };
+    out[k] = { id: u.id, name: u.name };
+  }
+  return out;
+}
+const fail = (res, e) => res.status((e && e.status) || 500).json({ error: (e && (e.msg || e.error)) || 'Error.' });
+const same = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
+/* Datos que fija el servidor (no se confía en lo que mande el navegador). */
+function stampComment(ctx, op, cur, body) {
+  const texto = String((body && body.texto) || '').trim().slice(0, 2000);
+  if (!texto) throw { status: 400, msg: 'Escribe el comentario.' };
+  if (op === 'create') return { projectId: String((body && body.projectId) || ''), texto, autorId: ctx.uid, autor: ctx.name, rol: perm.ROLE_LABEL[ctx.role], ts: new Date().toISOString() };
+  return Object.assign({}, cur, { texto, editedAt: new Date().toISOString() });
+}
+
+app.get('/api/docs/:col', colOk, wrap(async (req, res) => {
+  const ctx = await ctxOf(req), col = req.params.col;
+  const rows = await store.listDocs(col), out = [];
+  rows.forEach(r => { const d = perm.readDoc(ctx, col, r.id, r.data); if (d != null) out.push({ id: r.id, data: d, version: r.version }); });
+  res.json(out);
+}));
+/* Valida y prepara una escritura. Devuelve { data } con el documento a guardar (o { patch } en PATCH). */
+async function prepWrite(req, op, id) {
+  const ctx = await ctxOf(req), col = req.params.col, curRow = id ? await store.getDoc(col, id) : null, cur = curRow ? curRow.data : null;
+  let body = req.body, kind = !cur ? 'create' : (op === 'delete' ? 'delete' : 'update');
+  if (op === 'delete') {
+    if (!cur && ctx.role !== 'admin') throw { status: 404, msg: 'No existe.' };
+    const pr = perm.writeProblem(ctx, col, id, 'delete', cur, null); if (pr) throw { status: 403, msg: pr };
+    return { ctx, cur };
+  }
+  if (col === 'comentarios') body = stampComment(ctx, kind, cur, body);
+  let nxt = op === 'patch' ? store.deepMerge(cur || {}, body) : body;
+  if (col === 'projects') {
+    if (ctx.role === 'analista') {   /* el analista no cambia quién está asignado */
+      if (op === 'patch') { body = Object.assign({}, body); delete body.asignacion; nxt = store.deepMerge(cur || {}, body); }
+      else { nxt = Object.assign({}, body); if (cur && cur.asignacion) nxt.asignacion = cur.asignacion; else delete nxt.asignacion; }
+    } else if (ctx.role === 'admin' && (kind === 'create' || (nxt && !same(nxt.asignacion, cur && cur.asignacion)))) {
+      if (kind === 'create' || nxt.asignacion) { nxt = Object.assign({}, nxt); nxt.asignacion = await normAsig(nxt.asignacion); if (op === 'patch') body = Object.assign({}, body, { asignacion: nxt.asignacion }); }
+    }
+  }
+  if (col === 'bitacora' && ctx.role === 'analista') { nxt = Object.assign({}, nxt, { analystId: ctx.analystDocId }); if (op === 'patch') body = Object.assign({}, body, { analystId: ctx.analystDocId }); }
+  const pr = perm.writeProblem(ctx, col, id, kind, cur, nxt); if (pr) throw { status: 403, msg: pr };
+  return { ctx, cur, data: op === 'patch' ? undefined : nxt, patch: op === 'patch' ? body : undefined };
+}
 app.post('/api/docs/:col', colOk, wrap(async (req, res) => {
-  const id = store.newId(), d = await store.setDoc(req.params.col, id, req.body, req.user.name);
-  broadcast({ op: 'set', col: req.params.col, id, data: d.data, version: d.version }); res.json({ id, version: d.version });
+  try {
+    const id = store.newId(), w = await prepWrite(req, 'post', null), d = await store.setDoc(req.params.col, id, w.data, req.user.name);
+    broadcast({ op: 'set', col: req.params.col, id, data: d.data, version: d.version }); res.json({ id, version: d.version });
+  } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.put('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
-  const d = await store.setDoc(req.params.col, req.params.id, req.body, req.user.name);
-  broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version });
+  try {
+    const w = await prepWrite(req, 'put', req.params.id), d = await store.setDoc(req.params.col, req.params.id, w.data, req.user.name);
+    broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version });
+  } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.patch('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
-  const d = await store.mergeDoc(req.params.col, req.params.id, req.body, req.user.name);
-  broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version, data: d.data });
+  try {
+    const w = await prepWrite(req, 'patch', req.params.id), d = await store.mergeDoc(req.params.col, req.params.id, w.patch, req.user.name);
+    broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version, data: perm.readDoc(w.ctx, req.params.col, d.id, d.data) });
+  } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.delete('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
+  try { await prepWrite(req, 'delete', req.params.id); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
   await store.delDoc(req.params.col, req.params.id);
   broadcast({ op: 'del', col: req.params.col, id: req.params.id });
-  if (req.params.col === 'projects') { await store.delDoc('azure_bugs', req.params.id); broadcast({ op: 'del', col: 'azure_bugs', id: req.params.id }); }
+  if (req.params.col === 'projects') {
+    await store.delDoc('azure_bugs', req.params.id); broadcast({ op: 'del', col: 'azure_bugs', id: req.params.id });
+    const cm = await db.q("DELETE FROM docs WHERE col='comentarios' AND data->>'projectId'=$1 RETURNING id", [req.params.id]);
+    cm.rows.forEach(r => broadcast({ op: 'del', col: 'comentarios', id: r.id }));
+  }
   res.json({ ok: true });
 }));
 
 /* ---------- Azure DevOps (solo lectura) ---------- */
 const azErr = (res, e) => res.status((e && e.status) || 502).json({ error: (e && e.msg) || 'No se pudo consultar Azure DevOps.', code: (e && e.code) || 'azure' });
-app.post('/api/azure/test', wrap(async (req, res) => {
+app.post('/api/azure/test', staffOnly, wrap(async (req, res) => {
   if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
   if (!azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas. Espera unos minutos.', code: 'rate_limited' });
   try { res.json(await azure.preview(req.body)); } catch (e) { azErr(res, e); }
 }));
-app.post('/api/azure/test-plan', wrap(async (req, res) => {
+app.post('/api/azure/test-plan', staffOnly, wrap(async (req, res) => {
   if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
   if (!azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas. Espera unos minutos.', code: 'rate_limited' });
   try { res.json(await azure.previewTests(req.body)); } catch (e) { azErr(res, e); }
 }));
-app.post('/api/azure/sync/:id', wrap(async (req, res) => {
+app.post('/api/azure/sync/:id', staffOnly, wrap(async (req, res) => {
   if (!store.ID_RE.test(req.params.id)) return res.status(400).json({ error: 'Id inválido.' });
+  if (req.user.role === 'analista' && !perm.projAssigned('analista', req.user.id, req.params.id)) return res.status(403).json({ error: 'Ese proyecto no está asignado a ti.' });
   if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
   const force = !!(req.body && req.body.force);
   if (force && !azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas sincronizaciones seguidas. Espera unos minutos.', code: 'rate_limited' });
@@ -170,7 +280,7 @@ app.post('/api/azure/sync/:id', wrap(async (req, res) => {
 }));
 
 /* ---------- IA (Gemini) ---------- */
-app.post('/api/ai', wrap(async (req, res) => {
+app.post('/api/ai', staffOnly, wrap(async (req, res) => {
   if (!ai.enabled()) return res.status(503).json({ code: 'sampling_disabled' });
   if (!ai.rateOk(req.user.id)) return res.status(429).json({ code: 'rate_limited' });
   const { prompt, images } = req.body || {};
@@ -193,7 +303,7 @@ app.post('/api/admin/users', adminOnly, wrap(async (req, res) => {
   if (!/^[a-z0-9._-]{3,40}$/.test(username)) return res.status(400).json({ error: 'Usuario: 3–40 caracteres (letras minúsculas, números, punto, guion).' });
   if (!name) return res.status(400).json({ error: 'Escribe el nombre completo.' });
   const bad = auth.passwordProblem(b.password); if (bad) return res.status(400).json({ error: bad });
-  const role = b.role === 'admin' ? 'admin' : 'analista';
+  const role = perm.ROLES.includes(b.role) ? b.role : 'analista';
   try { await db.q('INSERT INTO users(username,name,role,pass_hash,must_change) VALUES ($1,$2,$3,$4,true)', [username, name, role, auth.hashPassword(b.password)]); }
   catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Ese usuario ya existe.' }); throw e; }
   res.json({ ok: true });
@@ -209,7 +319,7 @@ app.patch('/api/admin/users/:id', adminOnly, wrap(async (req, res) => {
   const sets = [], vals = [id];
   const add = (c, v) => { vals.push(v); sets.push(c + '=$' + vals.length); };
   if (typeof b.name === 'string' && b.name.trim()) add('name', b.name.trim());
-  if (b.role === 'admin' || b.role === 'analista') add('role', b.role);
+  if (perm.ROLES.includes(b.role)) { add('role', b.role); sets.push('pv=pv+1'); }
   if (typeof b.active === 'boolean') { add('active', b.active); sets.push('pv=pv+1'); }
   if (b.password) {
     const bad = auth.passwordProblem(b.password); if (bad) return res.status(400).json({ error: bad });
@@ -232,16 +342,18 @@ app.post('/api/admin/restore', adminOnly, wrap(async (req, res) => {
   const b = req.body || {}; const cols = b.collections || ((b.app === 'quqi-qa' || b.app === 'qa-certifica') ? b.collections : null);
   if (!cols || typeof cols !== 'object') return res.status(400).json({ error: 'El archivo no tiene el formato de un respaldo de QUQI_QA.' });
   const stat = await store.restoreDocs(cols, b.mode === 'replace' ? 'replace' : 'merge', req.user.name);
+  perm.loadPA(await store.listDocs('projects'));
   broadcast({ op: 'resync' });
   res.json(stat);
 }));
 
-app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: '1h' }));
+app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: '1h', setHeaders: (res, f) => { if (/\.(html|js)$/.test(f) && !/vendor/.test(f)) res.setHeader('Cache-Control', 'no-cache'); } }));
 app.use((req, res) => res.status(404).type('text').send('No encontrado'));
 
 (async () => {
   await db.init();
   await auth.bootstrapAdmin();
+  perm.loadPA(await store.listDocs('projects'));
   const port = process.env.PORT || 3000;
   app.listen(port, () => { azure.startScheduler(broadcast); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
 })().catch(e => { console.error('No se pudo iniciar:', e.message); process.exit(1); });

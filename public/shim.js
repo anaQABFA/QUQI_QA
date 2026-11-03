@@ -65,7 +65,8 @@
       },
       async add(data){
         const r = await api('POST', '/api/docs/' + col, data);
-        applyDoc(col, r.id, clone(data), r.version); return { id: r.id };
+        if(!colState(col).map.has(r.id)) applyDoc(col, r.id, clone(data), r.version);   /* si el servidor ya envió su copia (con autor y fecha), se conserva */
+        return { id: r.id };
       },
       doc(id){
         return {
@@ -129,6 +130,9 @@
     sync: (id, force) => api('POST', '/api/azure/sync/' + encodeURIComponent(id), { force: !!force })
   };
 
+  /* ---------- usuarios (solo el administrador: para asignar proyectos) ---------- */
+  const rosterFn = async () => (await api('GET', '/api/admin/users')).filter(u => u.active).map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role }));
+
   /* ---------- sesión / usuario ---------- */
   const meP = api('GET', '/api/me').then(me => {
     window.__me = me;
@@ -141,6 +145,8 @@
     const box = who.parentNode, bar = document.createElement('div');
     bar.style.cssText = 'display:flex;gap:10px;align-items:center;font-size:12.5px;flex-wrap:wrap;justify-content:flex-end;';
     const link = (t, h, fn) => { const a = document.createElement('a'); a.textContent = t; a.href = h || '#'; a.style.cssText = 'color:var(--accent-strong);text-decoration:none;font-weight:600;'; if(fn) a.addEventListener('click', e => { e.preventDefault(); fn(); }); return a; };
+    const chip = document.createElement('span'); chip.textContent = me.user.roleLabel || me.user.role;
+    chip.style.cssText = 'background:var(--accent-soft,#e8eefc);color:var(--accent-strong);border-radius:999px;padding:2px 10px;font-weight:700;font-size:11.5px;'; bar.appendChild(chip);
     if(me.user.role === 'admin') bar.appendChild(link('Administración', '/admin.html'));
     bar.appendChild(link('Cambiar contraseña', '/login.html?change=1'));
     bar.appendChild(link('Salir', '#', async () => { try{ await api('POST', '/api/logout', {}); }catch(e){} location.href = '/login.html'; }));
@@ -161,6 +167,7 @@
       if(name === 'sample') return me.ai && me.ai.enabled ? sampleNS : null;
       if(name === 'downloads') return dlNS;
       if(name === 'azure') return me.azure && me.azure.enabled ? azureNS : null;
+      if(name === 'roster') return me.user.role === 'admin' ? rosterFn : null;
       return null;
     }
   };
