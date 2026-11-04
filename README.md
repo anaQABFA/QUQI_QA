@@ -113,6 +113,27 @@ Los usuarios se crean en **Administración** (solo tú, administrador). Hay cinc
 * Todo se valida en el servidor, no solo en la pantalla: aunque alguien manipule el navegador, su perfil no puede leer ni escribir lo que no le corresponde.
 * Si cambias el perfil de alguien, su sesión se actualiza sola en el siguiente movimiento.
 
+## 6e. Bitácora del equipo, casos ejecutados y meta de 12
+
+**Quién aparece.** Cada usuario con perfil *Analista QA* tiene su ficha en la bitácora desde que se crea (Administración → Crear usuario). Si ya existía una ficha de la bitácora sin usuario, al crear el usuario puedes elegirla en «Vincular con analista ya registrado» y se conserva todo su historial. En Administración puedes **editar el nombre** y **eliminar** a cada usuario. Eliminar no es posible si está asignado a proyectos (se te indica cuáles; reasígnalos o desactívalo). Al eliminar un usuario su bitácora se conserva como ficha sin usuario, que el administrador puede renombrar o eliminar desde la pestaña Bitácora (eliminar la ficha borra también sus horas).
+
+**Vistas.** Administrador y PMO ven la *Bitácora del equipo* (día / semana / mes): una fila por analista con proyecto en pruebas, casos ejecutados, cumplimiento de la meta, horas probando/bloqueado, bugs y días con registro, más el total del equipo y un resumen en texto. Al hacer clic en el nombre se abre la vista solo de ese analista (día, semana y mes), su calendario y sus **proyectos** agrupados en *En pruebas*, *Próximos a probar* y *Cerrados*; en cada proyecto en pruebas se ven los casos ejecutados por día. El analista solo ve y edita su propia bitácora; PMO y PO son de solo lectura.
+
+**Casos ejecutados.** Salen de Azure Test Plans del proyecto en pruebas (el proyecto debe tener su plan vinculado, ver 6c). Cada caso se cuenta para quien lo ejecutó en Azure (se compara el nombre o usuario de Azure con el del analista; si no hay coincidencia se atribuye al analista asignado al proyecto). Cuentan los exitosos, fallidos y bloqueados. Limitación de Azure: de cada caso solo se conserva la **última** ejecución; si se reejecuta otro día, ese caso pasa al día más reciente.
+
+**Meta.** 12 casos mínimo por día hábil (se excluyen fines de semana y festivos de Colombia) para cada analista que ese día tenga un proyecto en pruebas **con plan de Azure vinculado** (recibido, ya iniciado, sin cerrar ni congelar). Estados: cumple, incumple, en curso (hoy), sin plan de Azure, sin proyecto y día libre. El día de hoy no cuenta como incumplido hasta que termine.
+
+## 6f. Integración con otros aplicativos (Fluxor): llaves de acceso
+
+Para que **Fluxor** (u otro aplicativo) lea los porcentajes de los proyectos sin usuario ni contraseña, entra a **Administración → Integraciones → Crear llave**, ponle un nombre (por ejemplo, Fluxor) y copia la llave: **solo se muestra una vez** (en la base solo se guarda su huella, no la llave). Guárdala en las variables de entorno del servidor de Fluxor, nunca en el navegador ni en el código. Si se pierde o se filtra, **Revocar** la deja sin efecto al instante y creas otra. Puedes ver cuándo la usó por última vez y cuántas consultas hizo.
+
+La llave es **solo lectura** y **solo sirve para estos dos endpoints** (no abre ninguna otra parte de QUQI y no da acceso a comentarios, usuarios, bitácora ni bugs):
+
+- `GET /api/integracion/proyectos` → todos los proyectos (abiertos y cerrados). Filtros opcionales: `?estado=abiertos|cerrados|en_pruebas|proximo|backlog` y `?nombre=texto`.
+- `GET /api/integracion/proyectos/{id}` → un proyecto.
+
+Se envía la llave en la cabecera `Authorization: Bearer <llave>` (o `X-API-Key`). Cada proyecto trae `id`, `nombre`, `estado` (`backlog`, `proximo`, `en_pruebas`, `cerrado`), `pctEntrega`, `pctQaCertificado`, `pctProbado`, `pctExito`, `casos` (total, aplicables, exitosos, fallidos, bloqueados, pausados, pendientes), `fuentePruebas` (`azure` o `manual`) y las fechas de actualización. Los porcentajes van de 0 a 100 con un decimal y son **los mismos que se ven en la pantalla**; si el proyecto aún no tiene avance de pruebas, `pctQaCertificado`, `pctProbado` y `pctExito` vienen en `null`. Límite: 120 consultas por minuto por llave; una llave inválida responde 401 y varios intentos fallidos seguidos bloquean la IP por 15 minutos. Hay una guía lista para el equipo de Fluxor en `GUIA_INTEGRACION_FLUXOR.md`.
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.

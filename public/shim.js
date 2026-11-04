@@ -8,7 +8,7 @@
   async function api(method, url, body){
     let r;
     try{
-      r = await fetch(url, { method, credentials:'same-origin', headers: body!==undefined ? {'Content-Type':'application/json'} : undefined, body: body!==undefined ? JSON.stringify(body) : undefined });
+      r = await fetch(url, { method, credentials:'same-origin', headers: {'Content-Type':'application/json'}, body: body!==undefined ? JSON.stringify(body) : undefined });
     }catch(e){ throw { code:'network' }; }
     if(r.status === 401){ goLogin(); throw { code:'unauthorized' }; }
     let j = null; try{ j = await r.json(); }catch(e){}

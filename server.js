@@ -8,6 +8,8 @@ const store = require('./lib/store');
 const ai = require('./lib/ai');
 const azure = require('./lib/azure');
 const perm = require('./lib/perm');
+const apikeys = require('./lib/apikeys');
+const metrics = require('./lib/metrics');
 
 if (String(process.env.SESSION_SECRET || '').length < 32) { console.error('Falta SESSION_SECRET (mínimo 32 caracteres aleatorios).'); process.exit(1); }
 
@@ -70,6 +72,45 @@ app.post('/api/login', wrap(async (req, res) => {
   res.json({ ok: true, mustChange: u.must_change });
 }));
 app.post('/api/logout', (req, res) => { auth.clearSession(res); res.json({ ok: true }); });
+
+/* ---------- integración (Fluxor u otros): solo lectura de porcentajes, con llave ---------- */
+const keyHits = new Map();   // id de llave → { n, t } (límite de 120 consultas por minuto)
+const normQ = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+app.use('/api/integracion', wrap(async (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Solo lectura: usa GET.' });
+  const lock = auth.lockedFor('k:' + req.ip);
+  if (lock) return res.status(429).json({ error: 'Demasiados intentos con una llave inválida. Espera ' + lock + ' min.' });
+  const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
+  const key = m ? m[1] : String(req.headers['x-api-key'] || '').trim();
+  const k = key ? await apikeys.verify(key) : null;
+  if (!k) { auth.noteFail('k:' + req.ip, 20); return res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'Llave inválida o revocada. Envíala en la cabecera Authorization: Bearer <llave>.' }); }
+  const now = Date.now(), h = keyHits.get(k.id) || { n: 0, t: now };
+  if (now - h.t > 60000) { h.n = 0; h.t = now; }
+  if (++h.n > 120) { keyHits.set(k.id, h); return res.status(429).set('Retry-After', '60').json({ error: 'Límite de 120 consultas por minuto.' }); }
+  keyHits.set(k.id, h);
+  req.apiKey = k; next();
+}));
+async function integracionRows() {
+  const pr = (await db.q("SELECT id, data, updated_at FROM docs WHERE col='projects'")).rows;
+  const az = new Map((await db.q("SELECT id, data FROM docs WHERE col='azure_bugs'")).rows.map(r => [r.id, r.data]));
+  return pr.map(r => metrics.summarize(r, az.get(r.id), new Date())).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+app.get('/api/integracion/proyectos', wrap(async (req, res) => {
+  let list = await integracionRows();
+  const est = normQ(req.query.estado);
+  if (est === 'abiertos') list = list.filter(p => !p.cerrado);
+  else if (est === 'cerrados') list = list.filter(p => p.cerrado);
+  else if (est && est !== 'todos') list = list.filter(p => p.estado === est);
+  const nom = normQ(req.query.nombre);
+  if (nom) list = list.filter(p => normQ(p.nombre).includes(nom));
+  res.json({ generadoEn: new Date().toISOString(), total: list.length, proyectos: list });
+}));
+app.get('/api/integracion/proyectos/:id', wrap(async (req, res) => {
+  const p = (await integracionRows()).find(x => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'No existe un proyecto con ese id.' });
+  res.json(Object.assign({ generadoEn: new Date().toISOString() }, p));
+}));
 
 /* ---------- puerta de acceso ---------- */
 app.use(wrap(async (req, res, next) => {
@@ -157,6 +198,28 @@ async function analystDocFor(u) {
   })();
   analystJobs.set(u.id, job);
   try { const id = await job; analystCache.set(u.id, id); return id; } finally { analystJobs.delete(u.id); }
+}
+/* Analistas QA activos: sirven para atribuir los casos ejecutados en Azure al analista correcto. */
+const analystsList = async () => (await db.q("SELECT id, name, username FROM users WHERE role='analista' AND active")).rows;
+/* Cada usuario analista tiene su ficha en la bitácora desde que se crea (no al primer ingreso). Si el administrador eligió una ficha existente sin usuario, se vincula. */
+async function ensureAnalyst(u, linkId) {
+  if (!u || u.role !== 'analista') return null;
+  if (linkId && store.ID_RE.test(String(linkId))) {
+    const d = await store.getDoc('analistas', String(linkId));
+    if (d && !d.data.userId) { const m = await store.mergeDoc('analistas', d.id, { userId: u.id }, 'sistema'); broadcast({ op: 'set', col: 'analistas', id: d.id, data: m.data, version: m.version }); analystCache.set(u.id, d.id); return d.id; }
+  }
+  return analystDocFor(u);
+}
+/* Si cambia el nombre de un usuario, se actualiza en su ficha de la bitácora y en las asignaciones de los proyectos. */
+async function syncUserName(uid, name) {
+  const fi = (await store.listDocs('analistas')).find(r => r.data && Number(r.data.userId) === uid);
+  if (fi && fi.data.name !== name) { const m = await store.mergeDoc('analistas', fi.id, { name }, 'sistema'); broadcast({ op: 'set', col: 'analistas', id: fi.id, data: m.data, version: m.version }); }
+  for (const r of await store.listDocs('projects')) {
+    const a = r.data && r.data.asignacion; if (!a) continue;
+    const ks = Object.keys(perm.ASSIGN_KEYS).filter(k => a[k] && Number(a[k].id) === uid && a[k].name !== name); if (!ks.length) continue;
+    const patch = { asignacion: {} }; ks.forEach(k => { patch.asignacion[k] = { id: uid, name }; });
+    const m = await store.mergeDoc('projects', r.id, patch, 'sistema'); broadcast({ op: 'set', col: 'projects', id: r.id, data: m.data, version: m.version });
+  }
 }
 async function ctxOf(req) {
   if (!req.ctx) req.ctx = { uid: req.user.id, role: req.user.role, name: req.user.name, analystDocId: await analystDocFor(req.user) };
@@ -248,8 +311,16 @@ app.patch('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
 }));
 app.delete('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
   try { await prepWrite(req, 'delete', req.params.id); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
+  if (req.params.col === 'analistas') {
+    const ficha = await store.getDoc('analistas', req.params.id);
+    if (ficha && ficha.data && ficha.data.userId) return res.status(400).json({ error: 'Esta ficha pertenece a un usuario activo: elimina primero el usuario en Administración.' });
+  }
   await store.delDoc(req.params.col, req.params.id);
   broadcast({ op: 'del', col: req.params.col, id: req.params.id });
+  if (req.params.col === 'analistas') {
+    const bd = await db.q("DELETE FROM docs WHERE col='bitacora' AND left(id, length($1) + 1) = $1 || '_' RETURNING id", [req.params.id]);
+    bd.rows.forEach(r => broadcast({ op: 'del', col: 'bitacora', id: r.id }));
+  }
   if (req.params.col === 'projects') {
     await store.delDoc('azure_bugs', req.params.id); broadcast({ op: 'del', col: 'azure_bugs', id: req.params.id });
     const cm = await db.q("DELETE FROM docs WHERE col='comentarios' AND data->>'projectId'=$1 RETURNING id", [req.params.id]);
@@ -276,7 +347,7 @@ app.post('/api/azure/sync/:id', staffOnly, wrap(async (req, res) => {
   if (!azure.enabled()) return res.status(503).json({ error: 'La conexión con Azure DevOps no está configurada en el servidor.', code: 'azure_disabled' });
   const force = !!(req.body && req.body.force);
   if (force && !azure.rateOk(req.user.id)) return res.status(429).json({ error: 'Demasiadas sincronizaciones seguidas. Espera unos minutos.', code: 'rate_limited' });
-  try { res.json(await azure.syncProject(req.params.id, req.user.name, { force, broadcast })); } catch (e) { azErr(res, e); }
+  try { res.json(await azure.syncProject(req.params.id, req.user.name, { force, broadcast, analysts: analystsList })); } catch (e) { azErr(res, e); }
 }));
 
 /* ---------- IA (Gemini) ---------- */
@@ -304,8 +375,10 @@ app.post('/api/admin/users', adminOnly, wrap(async (req, res) => {
   if (!name) return res.status(400).json({ error: 'Escribe el nombre completo.' });
   const bad = auth.passwordProblem(b.password); if (bad) return res.status(400).json({ error: bad });
   const role = perm.ROLES.includes(b.role) ? b.role : 'analista';
-  try { await db.q('INSERT INTO users(username,name,role,pass_hash,must_change) VALUES ($1,$2,$3,$4,true)', [username, name, role, auth.hashPassword(b.password)]); }
+  let nu;
+  try { nu = (await db.q('INSERT INTO users(username,name,role,pass_hash,must_change) VALUES ($1,$2,$3,$4,true) RETURNING id', [username, name, role, auth.hashPassword(b.password)])).rows[0]; }
   catch (e) { if (e.code === '23505') return res.status(409).json({ error: 'Ese usuario ya existe.' }); throw e; }
+  if (role === 'analista') await ensureAnalyst({ id: nu.id, name, role }, b.analistaId);
   res.json({ ok: true });
 }));
 app.patch('/api/admin/users/:id', adminOnly, wrap(async (req, res) => {
@@ -326,7 +399,34 @@ app.patch('/api/admin/users/:id', adminOnly, wrap(async (req, res) => {
     add('pass_hash', auth.hashPassword(b.password)); add('must_change', true); sets.push('pv=pv+1');
   }
   if (sets.length) await db.q('UPDATE users SET ' + sets.join(', ') + ' WHERE id=$1', vals);
+  const nm = typeof b.name === 'string' && b.name.trim() ? b.name.trim() : cur.name;
+  if (nm !== cur.name) await syncUserName(id, nm);
+  if (perm.ROLES.includes(b.role) && b.role === 'analista' && cur.role !== 'analista') await ensureAnalyst({ id, name: nm, role: 'analista' }, b.analistaId);
   res.json({ ok: true });
+}));
+/* Llaves de integración: se crean y revocan aquí; la llave completa solo se muestra al crearla. */
+app.get('/api/admin/apikeys', adminOnly, wrap(async (req, res) => res.json(await apikeys.list())));
+app.post('/api/admin/apikeys', adminOnly, wrap(async (req, res) => { const r = await apikeys.create(req.body && req.body.name, req.user.username); res.json({ key: r.key, info: r.info }); }));
+app.delete('/api/admin/apikeys/:id', adminOnly, wrap(async (req, res) => { const ok = await apikeys.revoke(parseInt(req.params.id, 10)); if (!ok) return res.status(404).json({ error: 'No existe o ya estaba revocada.' }); res.json({ ok: true }); }));
+/* Fichas de la bitácora que aún no tienen usuario (para vincularlas al crear un analista). */
+app.get('/api/admin/analistas-libres', adminOnly, wrap(async (req, res) => res.json((await store.listDocs('analistas')).filter(r => r.data && !r.data.userId).map(r => ({ id: r.id, name: r.data.name })))));
+/* Eliminar un usuario: no se permite si tiene proyectos asignados (se desactiva en su lugar); su bitácora se conserva. */
+app.delete('/api/admin/users/:id', adminOnly, wrap(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const cur = (await db.q('SELECT * FROM users WHERE id=$1', [id])).rows[0]; if (!cur) return res.status(404).json({ error: 'No existe.' });
+  if (id === req.user.id) return res.status(400).json({ error: 'No puedes eliminar tu propio usuario.' });
+  if (cur.role === 'admin' && cur.active) {
+    const n = (await db.q("SELECT count(*)::int AS n FROM users WHERE role='admin' AND active AND id<>$1", [id])).rows[0].n;
+    if (!n) return res.status(400).json({ error: 'Debe quedar al menos un administrador activo.' });
+  }
+  const mine = [];
+  for (const r of await store.listDocs('projects')) { const a = r.data && r.data.asignacion; if (a && Object.keys(perm.ASSIGN_KEYS).some(k => a[k] && Number(a[k].id) === id)) mine.push(r.data.name || r.id); }
+  if (mine.length) return res.status(409).json({ error: 'No se puede eliminar: está asignado a ' + mine.length + ' proyecto' + (mine.length === 1 ? '' : 's') + ' (' + mine.slice(0, 5).join(', ') + (mine.length > 5 ? '…' : '') + '). Reasígnalos primero, o desactiva el usuario.' });
+  await db.q('DELETE FROM users WHERE id=$1', [id]);
+  const fi = (await store.listDocs('analistas')).find(r => r.data && Number(r.data.userId) === id);
+  if (fi) { const m = await store.setDoc('analistas', fi.id, Object.assign({}, fi.data, { userId: null, sinUsuario: true }), 'sistema'); broadcast({ op: 'set', col: 'analistas', id: fi.id, data: m.data, version: m.version }); }
+  analystCache.delete(id);
+  res.json({ ok: true, bitacoraConservada: !!fi });
 }));
 app.get('/api/admin/backup', adminOnly, wrap(async (req, res) => {
   const out = { app: 'quqi-qa', formato: 1, exportadoEn: new Date().toISOString(), exportadoPor: req.user.username, collections: await store.exportAll() };
@@ -354,6 +454,7 @@ app.use((req, res) => res.status(404).type('text').send('No encontrado'));
   await db.init();
   await auth.bootstrapAdmin();
   perm.loadPA(await store.listDocs('projects'));
+  for (const u of (await db.q("SELECT id, name, role FROM users WHERE role='analista' AND active")).rows) { try { await ensureAnalyst(u); } catch (e) { console.error('Ficha de bitácora de ' + u.name + ': ' + e.message); } }
   const port = process.env.PORT || 3000;
-  app.listen(port, () => { azure.startScheduler(broadcast); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
+  app.listen(port, () => { azure.startScheduler(broadcast, analystsList); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
 })().catch(e => { console.error('No se pudo iniciar:', e.message); process.exit(1); });

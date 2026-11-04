@@ -16,11 +16,12 @@
  .pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:700;background:var(--alt)}
  .pill.on{color:var(--good)}.pill.off{color:var(--crit)}.pill.adm{color:var(--accent-s)}
  td button{padding:4px 9px;font-size:12.5px;margin-right:4px}
+ select[data-a=role]{min-width:150px}
  .banner{padding:10px 12px;border-radius:10px;background:rgba(250,178,25,.16);color:var(--warn);font-size:13.5px;margin-bottom:12px}
  .flex{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
 </style></head><body>
 <div class="wrap">
-  <div class="top"><div><h1>Administración</h1><p class="small" style="margin:2px 0 0">QUQI_QA · usuarios, respaldo y estado de la IA</p></div><a href="/">← Volver al tablero</a></div>
+  <div class="top"><div><h1>Administración</h1><p class="small" style="margin:2px 0 0">QUQI_QA · usuarios, respaldo, integraciones y estado de la IA</p></div><a href="/">← Volver al tablero</a></div>
   <div id="bkBanner"></div>
 
   <section class="card"><h2>Usuarios</h2>
@@ -32,6 +33,7 @@
       <div><label for="nn">Nombre completo</label><input id="nn" placeholder="Juan Pérez" required></div>
       <div><label for="np">Contraseña temporal</label><input id="np" type="text" placeholder="mín. 10, letras y números" required></div>
       <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista QA</option><option value="po">PO</option><option value="pmo_lider">PMO líder</option><option value="pmo">PMO</option><option value="admin">Administrador</option></select></div>
+      <div id="nlBox" style="display:none"><label for="nl">Vincular con analista ya registrado en la bitácora</label><select id="nl"><option value="">— Crear ficha nueva —</option></select></div>
       <div><button class="primary" type="submit" style="width:100%">Crear usuario</button></div>
     </form>
     <div class="msg" id="msgU"></div>
@@ -50,6 +52,23 @@
     <div class="msg" id="msgR"></div>
   </section>
 
+  <section class="card"><h2>Integraciones (llaves de acceso)</h2>
+    <p class="small" style="margin:0">Una llave permite que otro aplicativo, como <strong>Fluxor</strong>, consulte desde su servidor los <strong>porcentajes</strong> de los proyectos (entrega, QA certificado y casos ejecutados). Es de <strong>solo lectura</strong>: no ve comentarios, usuarios, bitácora ni bugs, y no puede modificar nada. La llave se muestra <strong>una sola vez</strong>; si se pierde, revoca y crea otra.</p>
+    <div class="tbl"><table><thead><tr><th>Nombre</th><th>Llave</th><th>Creada</th><th>Último uso</th><th>Consultas</th><th>Estado</th><th></th></tr></thead><tbody id="keys"></tbody></table></div>
+    <form id="fKey" class="row" autocomplete="off" style="margin-top:12px">
+      <div><label for="kn">Nombre de la llave</label><input id="kn" placeholder="Fluxor" maxlength="60" required></div>
+      <div><button class="primary" type="submit" style="width:100%">Crear llave</button></div>
+    </form>
+    <div class="msg" id="msgK"></div>
+    <div id="keyBox" style="display:none;margin-top:10px">
+      <div class="banner">Copia la llave ahora y guárdala en las variables de entorno del servidor de Fluxor. <strong>No se volverá a mostrar.</strong></div>
+      <div class="flex" style="margin-top:0"><input id="keyVal" readonly style="flex:1;min-width:260px;font-family:monospace"><button id="bCopyKey" type="button">Copiar</button></div>
+    </div>
+    <details style="margin-top:12px"><summary class="small" style="cursor:pointer"><strong>Cómo se usa (para quien desarrolla Fluxor)</strong></summary>
+      <pre id="keyDoc" style="white-space:pre-wrap;font-size:12.5px;background:var(--alt);padding:10px;border-radius:8px;overflow-x:auto;margin-top:8px"></pre>
+    </details>
+  </section>
+
   <section class="card"><h2>Inteligencia artificial</h2>
     <p id="aiState" class="small" style="margin:6px 0 0"></p>
   </section>
@@ -60,7 +79,7 @@ const $ = id => document.getElementById(id);
 const say = (id, t, c) => { $(id).textContent = t || ''; $(id).className = 'msg ' + (c || ''); };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(method, url, body){
-  const r = await fetch(url, { method, credentials:'same-origin', headers: body !== undefined ? {'Content-Type':'application/json'} : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+  const r = await fetch(url, { method, credentials:'same-origin', headers: {'Content-Type':'application/json'}, body: body !== undefined ? JSON.stringify(body) : undefined });
   if(r.status === 401){ location.href = '/login.html'; throw new Error('Sesión vencida'); }
   let j = {}; try{ j = await r.json(); }catch(e){}
   if(!r.ok) throw new Error(j.error || 'No se pudo completar la solicitud.');
@@ -85,7 +104,7 @@ async function loadUsers(){
     <td><select data-a="role" data-id="${u.id}" aria-label="Perfil de ${esc(u.username)}">${Object.keys(ROLES).map(k => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${ROLES[k]}</option>`).join('')}</select></td>
     <td><span class="pill ${u.active ? 'on' : 'off'}">${u.active ? 'Activo' : 'Inactivo'}</span>${u.must_change ? ' <span class="pill">cambio pendiente</span>' : ''}</td>
     <td>${fmt(u.last_login)}</td>
-    <td style="white-space:nowrap"><button data-a="pw" data-id="${u.id}">Restablecer clave</button><button data-a="act" data-id="${u.id}" data-v="${u.active ? 0 : 1}">${u.active ? 'Desactivar' : 'Activar'}</button></td></tr>`).join('');
+    <td style="white-space:nowrap"><button data-a="pw" data-id="${u.id}">Restablecer clave</button><button data-a="act" data-id="${u.id}" data-v="${u.active ? 0 : 1}">${u.active ? 'Desactivar' : 'Activar'}</button><button data-a="rename" data-id="${u.id}" data-name="${esc(u.name)}">Editar nombre</button><button data-a="del" data-id="${u.id}" data-name="${esc(u.name)}" style="color:var(--crit)">Eliminar</button></td></tr>`).join('');
 }
 $('users').addEventListener('click', async e => {
   const b = e.target.closest('button'); if(!b) return;
@@ -94,12 +113,19 @@ $('users').addEventListener('click', async e => {
     if(b.dataset.a === 'pw'){
       const pw = prompt('Nueva contraseña temporal (mín. 10 caracteres, letras y números). La persona deberá cambiarla al ingresar:');
       if(!pw) return; await api('PATCH', '/api/admin/users/' + id, { password: pw }); say('msgU', 'Contraseña restablecida. Compártela por un canal seguro.', 'ok');
+    } else if(b.dataset.a === 'rename'){
+      const nn = prompt('Nuevo nombre completo (se actualiza también en la bitácora y en los proyectos asignados):', b.dataset.name);
+      if(!nn || !nn.trim() || nn.trim() === b.dataset.name) return;
+      await api('PATCH', '/api/admin/users/' + id, { name: nn.trim() }); say('msgU', 'Nombre actualizado.', 'ok');
+    } else if(b.dataset.a === 'del'){
+      if(!confirm('¿Eliminar a «' + b.dataset.name + '»? Ya no podrá ingresar. Si es analista, su bitácora se conserva. Si tiene proyectos asignados no se puede eliminar (desactívalo).')) return;
+      const r = await api('DELETE', '/api/admin/users/' + id); say('msgU', 'Usuario eliminado.' + (r.bitacoraConservada ? ' Su bitácora se conservó en la pestaña Bitácora.' : ''), 'ok');
     } else if(b.dataset.a === 'act'){
       await api('PATCH', '/api/admin/users/' + id, { active: b.dataset.v === '1' });
     } else if(b.dataset.a === 'role'){
       await api('PATCH', '/api/admin/users/' + id, { role: b.dataset.v });
     }
-    await loadUsers();
+    await loadUsers(); await loadLibres();
   }catch(err){ say('msgU', err.message, 'err'); }
 });
 $('users').addEventListener('change', async e => {
@@ -111,8 +137,8 @@ $('users').addEventListener('change', async e => {
 $('fNew').addEventListener('submit', async e => {
   e.preventDefault(); say('msgU', '');
   try{
-    await api('POST', '/api/admin/users', { username: $('nu').value, name: $('nn').value, password: $('np').value, role: $('nr').value });
-    say('msgU', 'Usuario creado. Comparte usuario y contraseña temporal por un canal seguro.', 'ok'); $('fNew').reset(); await loadUsers();
+    await api('POST', '/api/admin/users', { username: $('nu').value, name: $('nn').value, password: $('np').value, role: $('nr').value, analistaId: $('nr').value === 'analista' ? $('nl').value : '' });
+    say('msgU', 'Usuario creado. Comparte usuario y contraseña temporal por un canal seguro.', 'ok'); $('fNew').reset(); await loadUsers(); await loadLibres();
   }catch(err){ say('msgU', err.message, 'err'); }
 });
 
@@ -155,5 +181,36 @@ $('bRestore').addEventListener('click', async () => {
     say('msgR', 'Listo: ' + r.escritos + ' documentos escritos' + (r.borrados ? ', ' + r.borrados + ' borrados' : '') + '. ' + Object.keys(r.colecciones).map(c => c + ' ' + r.colecciones[c]).join(' · '), 'ok');
   }catch(err){ say('msgR', err.message === 'Unexpected end of JSON input' || /JSON/.test(err.message) ? 'El archivo no es un JSON válido.' : err.message, 'err'); }
 });
-Promise.all([loadMe(), loadUsers()]).catch(e => say('msgU', e.message, 'err'));
+async function loadLibres(){
+  const l = await api('GET', '/api/admin/analistas-libres');
+  $('nl').innerHTML = '<option value="">— Crear ficha nueva —</option>' + l.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');
+  $('nlBox').style.display = $('nr').value === 'analista' && l.length ? '' : 'none';
+}
+$('nr').addEventListener('change', () => loadLibres().catch(() => {}));
+const keyDoc = () => 'Llamada desde el SERVIDOR de Fluxor (nunca desde el navegador, para no exponer la llave):\n\n' +
+  'curl -H "Authorization: Bearer TU_LLAVE" ' + location.origin + '/api/integracion/proyectos\n\n' +
+  'Filtros opcionales: ?estado=abiertos | cerrados | en_pruebas | proximo | backlog   ·   ?nombre=texto\n' +
+  'Un proyecto: ' + location.origin + '/api/integracion/proyectos/{id}\n\n' +
+  'Cada proyecto trae: id, nombre, estado, cerrado, pctEntrega, pctQaCertificado, pctProbado, pctExito,\n' +
+  'casos {total, aplicables, exitosos, fallidos, bloqueados, pausados, pendientes}, fuentePruebas (azure | manual),\n' +
+  'pruebasActualizadoEn y actualizadoEn. Los porcentajes van de 0 a 100 con un decimal; si aún no hay avance de pruebas, vienen en null.\n' +
+  'Límite: 120 consultas por minuto por llave. Respuestas 401 = llave inválida o revocada.';
+$('keyDoc').textContent = keyDoc();
+async function loadKeys(){
+  const l = await api('GET', '/api/admin/apikeys');
+  $('keys').innerHTML = l.length ? l.map(k => `<tr style="${k.revoked_at ? 'opacity:.55' : ''}"><td><strong>${esc(k.name)}</strong></td><td><code>${esc(k.prefix)}…</code></td><td>${fmt(k.created_at)}</td><td>${k.last_used_at ? fmt(k.last_used_at) : 'nunca'}</td><td>${k.uses}</td><td><span class="pill ${k.revoked_at ? 'off' : 'on'}">${k.revoked_at ? 'Revocada' : 'Activa'}</span></td><td>${k.revoked_at ? '' : `<button data-k="${k.id}" data-name="${esc(k.name)}" style="color:var(--crit)">Revocar</button>`}</td></tr>`).join('') : '<tr><td colspan="7" class="small">Aún no hay llaves.</td></tr>';
+}
+$('fKey').addEventListener('submit', async e => {
+  e.preventDefault(); say('msgK', ''); $('keyBox').style.display = 'none';
+  try{ const r = await api('POST', '/api/admin/apikeys', { name: $('kn').value }); $('keyVal').value = r.key; $('keyBox').style.display = ''; $('fKey').reset(); say('msgK', 'Llave creada.', 'ok'); await loadKeys(); }
+  catch(err){ say('msgK', err.message, 'err'); }
+});
+$('bCopyKey').addEventListener('click', async () => { try{ await navigator.clipboard.writeText($('keyVal').value); }catch(e){ $('keyVal').select(); document.execCommand('copy'); } say('msgK', 'Llave copiada.', 'ok'); });
+$('keys').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-k]'); if(!b) return;
+  if(!confirm('¿Revocar la llave «' + b.dataset.name + '»? Quien la use dejará de recibir datos de inmediato. No se puede deshacer.')) return;
+  try{ await api('DELETE', '/api/admin/apikeys/' + b.dataset.k); $('keyBox').style.display = 'none'; say('msgK', 'Llave revocada.', 'ok'); await loadKeys(); }
+  catch(err){ say('msgK', err.message, 'err'); }
+});
+Promise.all([loadMe(), loadUsers(), loadLibres(), loadKeys()]).catch(e => say('msgU', e.message, 'err'));
 </script></body></html>

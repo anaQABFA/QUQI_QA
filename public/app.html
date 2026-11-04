@@ -295,6 +295,14 @@
   .monthnav{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
   .monthnav strong{ font-family:"Sora",sans-serif; font-size:14px; }
   .daytiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:14px; }
+  .bitteam th,.bitteam td{ padding-left:6px; padding-right:6px; }
+  .bitteam td:first-child{ min-width:150px; }
+  .bitteam td .namebtn{ white-space:normal; }
+  .namebtn{ background:none; border:0; padding:0; color:var(--accent-strong); font:inherit; font-weight:700; cursor:pointer; text-align:left; text-decoration:underline; text-underline-offset:2px; }
+  .totrow td{ border-top:2px solid var(--border); font-weight:600; }
+  .casosbox{ margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .chipcase{ font-size:11.5px; padding:2px 8px; border-radius:999px; background:var(--surface-alt); color:var(--text-secondary); }
+  .chipcase.on{ background:rgba(12,163,12,0.12); color:var(--good); }
   .tile{ border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:var(--surface); }
   .tile .l{ font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
   .tile .v{ font-size:18px; font-weight:700; font-family:"IBM Plex Mono",monospace; }
@@ -456,7 +464,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js?v=20261029"></script>
+<script src="/shim.js?v=20261104"></script>
 <script>
 (function(){
 'use strict';
@@ -1623,7 +1631,7 @@ let qaEdit = null;   // edición del plazo de pruebas en el detalle del proyecto
 const openDetails = new Set();
 let critForm = null;   // formulario abierto bajo un criterio: {pid, hu, c, tipo:'alcance'|'no_aplica', texto, motivo}
 const cdraft = {};      // borradores del módulo de comentarios por HU: {hu: {crit, texto}}
-let bit = { analystId:null, date:ymd(new Date()), view:'dia', month:ymOf(new Date()), bugForm:null, saveState:'', newName:'' };
+let bit = { analystId:null, open:false, tview:'dia', date:ymd(new Date()), view:'dia', month:ymOf(new Date()), bugForm:null, saveState:'', newName:'' };
 let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinculo:'child' };
 /* Conexión en vivo con Azure DevOps (solo en la versión web con llave configurada en el servidor) */
 /* Diseño (Figma): formulario del proyecto abierto, edición de comentario y borrado en dos pasos */
@@ -1656,7 +1664,7 @@ function ingest(col, list){
   if(col==='projects'){
     projects = list.map(normalizeProject).sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
   } else if(col==='analistas'){
-    analistas = list.map(a => ({id:a.id, name:String(a.name||'')})).sort((a,b) => a.name.localeCompare(b.name,'es'));
+    analistas = list.map(a => Object.assign({}, a, {id:a.id, name:String(a.name||''), userId:a.userId||null})).sort((a,b) => a.name.localeCompare(b.name,'es'));
     if(!bit.analystId || !analistas.some(a => a.id===bit.analystId)){
       const saved = lsGet('qacert_analyst');
       const me = analistas.find(a => a.name.toLowerCase()===whoName().toLowerCase());
@@ -3166,30 +3174,281 @@ function weekViewHtml(a){
       <div class="flexrow"><button class="btn btn-sm" data-act="bit-shift" data-d="-7" type="button" aria-label="Semana anterior">‹</button><button class="btn btn-sm" data-act="bit-today" type="button">Hoy</button><button class="btn btn-sm" data-act="bit-shift" data-d="7" type="button" aria-label="Semana siguiente">›</button></div></div>
     <div class="tablewrap"><table class="weekgrid"><thead><tr><th>Hora</th>${head}</tr></thead><tbody>${rows}${totals}</tbody></table></div>`;
 }
-function monthSummaryHtml(){
-  const aggs = monthAgg(analistas, bitMap, bit.month);
-  const rows = aggs.map(r => {
-    const tot = r.prueba + r.bloqueado;
-    const top = Object.entries(r.motivos).sort((a,b) => b[1]-a[1]).slice(0,2).map(([k,v]) => k + ' (' + v + ' h)').join(', ');
-    return `<tr><td data-label="Analista"><strong>${escapeHtml(r.analista.name)}</strong></td><td class="num" data-label="Días">${r.dias}</td><td class="num" data-label="Probando">${r.prueba} h</td><td class="num" data-label="Bloqueado">${r.bloqueado} h</td>
-      <td class="num" data-label="% bloqueo">${tot ? fmtPct(r.bloqueado/tot*100) : '—'}</td><td class="num" data-label="Reunión / gestión">${r.reunion + r.gestion} h</td><td class="num" data-label="Bugs">${r.bugs} · ${r.bugMin} min</td><td class="num" data-label="Días con extras">${r.extras}</td><td data-label="Motivos de bloqueo">${escapeHtml(top || '—')}</td></tr>`;
+
+/* ================= BITÁCORA DEL EQUIPO: casos ejecutados (Azure), meta diaria y resúmenes ================= */
+const CASOS_META = 12;      // casos de prueba mínimos por día hábil con un proyecto en pruebas
+let bitEdit = null;         // edición / borrado de una ficha de analista sin usuario: {id, name, del}
+const esc2 = escapeHtml;
+const h1 = n => (Math.round((Number(n)||0)*10)/10).toLocaleString('es-CO') + ' h';
+
+/* ---- datos: casos ejecutados por analista y día (vienen de Azure Test Plans, guardados por el servidor) ---- */
+function casosOf(a, date){
+  const out = {tot:0, ok:0, fail:0, block:0, rows:[]};
+  if(!a || !a.userId) return out;
+  azBugs.forEach((d, pid) => {
+    const v = d && d.execDays && d.execDays[date] && d.execDays[date][String(a.userId)]; if(!v) return;
+    const ok = v[0]|0, fail = v[1]|0, block = v[2]|0, t = ok + fail + block; if(!t) return;
+    const p = projects.find(x => x.id===pid); if(!p) return;
+    out.rows.push({p, ok, fail, block, tot:t}); out.tot += t; out.ok += ok; out.fail += fail; out.block += block;
+  });
+  out.rows.sort((x,y) => y.tot - x.tot);
+  return out;
+}
+function analystProjects(a){
+  return a && a.userId ? projects.filter(p => p.asignacion && p.asignacion.analista && Number(p.asignacion.analista.id)===Number(a.userId)) : [];
+}
+function frozenOn(p, d){
+  const fi = freezeInfo(segs.filter(e => e.projectId===p.id), d);
+  return fi.intervals.some(i => d >= i.desde && d < i.hasta) || !!(fi.current && d >= fi.current.desde);
+}
+/* ¿Ese día el proyecto estaba en pruebas? Recibido en QA, ya iniciadas las pruebas, sin cerrar y sin estar congelado. */
+function activeOnDay(p, d){
+  if(!isReceived(p)) return false;
+  const start = [toYmdLocal(p.testStart), p.recibidoEn].filter(Boolean).sort().pop() || '';
+  if(!start || d < start) return false;
+  const end = isClosed(p) ? toYmdLocal(closedAt(p)) : '';
+  if(end && d > end) return false;
+  return !frozenOn(p, d);
+}
+/* Estado de la meta de un día: cumple / incumple / en_curso (hoy, aún sin llegar) / sin_azure / sin_proyecto / libre / futuro */
+function metaOf(a, date){
+  const today = ymd(new Date()), c = casosOf(a, date), r = {date, c, k:'', act:[], noAz:[]};
+  if(date > today){ r.k = 'futuro'; return r; }
+  if(!isBizDay(date)){ r.k = 'libre'; return r; }
+  analystProjects(a).forEach(p => { if(activeOnDay(p, date)) (p.azureTest ? r.act : r.noAz).push(p); });
+  if(!r.act.length) r.k = r.noAz.length ? 'sin_azure' : 'sin_proyecto';
+  else if(c.tot >= CASOS_META) r.k = 'cumple';
+  else r.k = date===today ? 'en_curso' : 'incumple';
+  return r;
+}
+function metaBadge(m, short){
+  const falta = Math.max(0, CASOS_META - m.c.tot);
+  switch(m.k){
+    case 'cumple': return `<span class="badge ans-cumple"><span class="dot"></span>${short ? '✓ ' + m.c.tot : '✓ Meta cumplida · ' + m.c.tot + ' casos'}</span>`;
+    case 'incumple': return `<span class="badge ans-incumple"><span class="dot"></span>${short ? '✗ ' + m.c.tot : '✗ Bajo la meta · ' + m.c.tot + ' de ' + CASOS_META}</span>`;
+    case 'en_curso': return `<span class="badge badge-parcial"><span class="dot"></span>${short ? m.c.tot + ' · faltan ' + falta : 'En curso · ' + m.c.tot + ' de ' + CASOS_META + ' (faltan ' + falta + ')'}</span>`;
+    case 'sin_azure': return `<span class="badge badge-pendiente" title="El proyecto en pruebas no tiene un plan de Azure Test Plans vinculado"><span class="dot"></span>${short ? 'Sin plan Azure' : 'Sin plan de Azure vinculado'}</span>`;
+    case 'sin_proyecto': return `<span class="badge badge-pendiente"><span class="dot"></span>${short ? '—' : 'Sin proyecto en pruebas'}</span>`;
+    case 'libre': return `<span class="badge badge-pendiente"><span class="dot"></span>${short ? '—' : 'Día no hábil'}</span>`;
+    default: return '<span class="small">—</span>';
+  }
+}
+
+/* ---- períodos ---- */
+function periodDates(view){
+  if(view==='dia') return [bit.date];
+  if(view==='semana'){ const s = startOfWeek(parseYmd(bit.date)); return [0,1,2,3,4,5,6].map(i => ymd(addDays(s, i))); }
+  const [y,m] = bit.month.split('-').map(Number), n = new Date(y, m, 0).getDate();
+  return Array.from({length:n}, (_,i) => y + '-' + pad2(m) + '-' + pad2(i+1));
+}
+function periodLabel(view){
+  if(view==='dia') return cap(fmtYmd(bit.date, {weekday:'long', day:'numeric', month:'long'}));
+  if(view==='semana'){ const ds = periodDates('semana'); return 'Semana del ' + fmtYmd(ds[0], {day:'numeric', month:'long'}) + ' al ' + fmtYmd(ds[6], {day:'numeric', month:'long'}); }
+  return monthNavLabel(bit.month);
+}
+const VIEW_NAME = {dia:'del día', semana:'de la semana', mes:'del mes'};
+function periodStats(a, dates){
+  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, bugs:0, bugMin:0, dias:0, extras:0, motivos:{}, casos:0, ok:0, fail:0, block:0, exig:0, cumple:0, days:[]};
+  dates.forEach(d => {
+    const day = getDay(a.id, d), s = daySummary(day), m = metaOf(a, d);
+    if(s.registrado > 0) r.dias++;
+    r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion; r.bugs += s.bugs; r.bugMin += s.bugMin;
+    if(day){ if(day.extras) r.extras++; SLOTS.forEach(sl => { const x = day.slots[sl.k]; if(x && x.e==='bloqueado'){ const mo = x.m || 'Sin motivo'; r.motivos[mo] = (r.motivos[mo]||0) + 1; } }); }
+    r.casos += m.c.tot; r.ok += m.c.ok; r.fail += m.c.fail; r.block += m.c.block;
+    if(m.k==='cumple' || m.k==='incumple'){ r.exig++; if(m.k==='cumple') r.cumple++; }
+    r.days.push({d, s, m});
+  });
+  r.reg = r.prueba + r.bloqueado + r.reunion + r.gestion;
+  r.topMotivo = Object.entries(r.motivos).sort((x,y) => y[1]-x[1])[0];
+  return r;
+}
+/* Resumen en palabras de cómo le fue a un analista (o al equipo) en el período. */
+function narrativa(st, view, opt){
+  opt = opt || {};
+  const sujeto = opt.team ? 'El equipo' : 'El analista';
+  const partes = [];
+  if(!st.reg && !st.casos){
+    return view==='dia' ? 'Aún no hay horas registradas ni casos ejecutados este día.' : 'No hay horas registradas ni casos ejecutados en este período.';
+  }
+  if(st.reg){
+    let t = (view==='dia' ? 'Registró ' : 'Registró ') + h1(st.reg) + ': ' + h1(st.prueba) + ' probando';
+    if(st.bloqueado) t += ', ' + h1(st.bloqueado) + ' bloqueado' + (st.topMotivo ? ' (sobre todo por «' + st.topMotivo[0].toLowerCase() + '»)' : '');
+    if(st.reunion + st.gestion) t += ' y ' + h1(st.reunion + st.gestion) + ' en reunión y gestión';
+    partes.push(t + '.');
+    if(st.prueba + st.bloqueado > 0 && st.bloqueado > 0) partes.push('El bloqueo fue el ' + fmtPct(st.bloqueado / (st.prueba + st.bloqueado) * 100) + ' del tiempo de pruebas.');
+  }
+  if(st.casos) partes.push('Ejecutó ' + st.casos + ' caso' + (st.casos===1?'':'s') + ' de prueba (' + st.ok + ' exitoso' + (st.ok===1?'':'s') + ', ' + st.fail + ' fallido' + (st.fail===1?'':'s') + ', ' + st.block + ' bloqueado' + (st.block===1?'':'s') + ').');
+  else if(st.exig) partes.push('No ejecutó casos de prueba en Azure.');
+  if(view==='dia'){
+    if(opt.meta) partes.push(opt.meta.k==='cumple' ? 'Cumple la meta de ' + CASOS_META + ' casos diarios.' : opt.meta.k==='incumple' ? 'No alcanzó la meta de ' + CASOS_META + ' casos diarios.' : opt.meta.k==='en_curso' ? 'Aún puede llegar a la meta de ' + CASOS_META + ' casos hoy.' : '');
+  } else if(st.exig){
+    partes.push('Cumplió la meta de ' + CASOS_META + ' casos en ' + st.cumple + ' de ' + st.exig + ' día' + (st.exig===1?'':'s') + ' con proyecto en pruebas (' + fmtPct(st.cumple / st.exig * 100) + ').');
+  }
+  return partes.filter(Boolean).join(' ').replace(/^El (analista|equipo)\s/, '');
+}
+
+/* ---- vista del equipo (administrador y PMO) ---- */
+function bitNavHtml(view){
+  const prev = view==='mes' ? `data-act="bit-month" data-d="-1"` : `data-act="bit-shift" data-d="${view==='semana' ? -7 : -1}"`;
+  const next = view==='mes' ? `data-act="bit-month" data-d="1"` : `data-act="bit-shift" data-d="${view==='semana' ? 7 : 1}"`;
+  return `<div class="flexrow"><button class="btn btn-sm" ${prev} type="button" aria-label="Anterior">‹</button><button class="btn btn-sm" data-act="bit-today" type="button">Hoy</button><button class="btn btn-sm" ${next} type="button" aria-label="Siguiente">›</button></div>`;
+}
+function bitSegHtml(act, cur){
+  return `<div class="seg">${[['dia','Día'],['semana','Semana'],['mes','Mes']].map(([v,l]) => `<button type="button" class="${cur===v?'on':''}" data-act="${act}" data-v="${v}">${l}</button>`).join('')}</div>`;
+}
+function bitTeamHtml(){
+  const view = bit.tview, dates = periodDates(view);
+  const rows = analistas.map(a => ({a, st: periodStats(a, dates), pr: analystProjects(a).filter(p => activeOnDay(p, ymd(new Date())))}));
+  const tot = rows.reduce((t, r) => { ['prueba','bloqueado','reunion','gestion','bugs','bugMin','casos','ok','fail','block','exig','cumple','extras'].forEach(k => { t[k] = (t[k]||0) + r.st[k]; }); t.conReg += r.st.reg ? 1 : 0; return t; }, {conReg:0});
+  const tn = rows.reduce((o, r) => { Object.entries(r.st.motivos).forEach(([k,v]) => { o[k] = (o[k]||0) + v; }); return o; }, {});
+  const teamSt = Object.assign({}, tot, {reg: (tot.prueba||0) + (tot.bloqueado||0) + (tot.reunion||0) + (tot.gestion||0), motivos: tn, topMotivo: Object.entries(tn).sort((x,y) => y[1]-x[1])[0]});
+  const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
+  const metaTxt = r => view==='dia'
+    ? metaBadge(metaOf(r.a, bit.date), true)
+    : (r.st.exig ? `<strong>${r.st.cumple}/${r.st.exig}</strong> días <span class="small">(${fmtPct(r.st.cumple / r.st.exig * 100)})</span>` : '<span class="small">—</span>');
+  const body = rows.map(r => {
+    const s = r.st, tp = s.prueba + s.bloqueado;
+    const motivo = Object.entries(s.motivos).sort((x,y) => y[1]-x[1]).slice(0,2).map(([k,v]) => k + ' (' + v + ' h)').join(', ');
+    const pnames = r.pr.length ? r.pr.map(p => `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(p.id)}">${esc2(p.name)}</button>`).join(', ') : '<span class="small">—</span>';
+    return `<tr><td data-label="Analista"><button type="button" class="namebtn" data-act="bit-open-analyst" data-id="${esc2(r.a.id)}">${esc2(r.a.name)}</button>${window.__me && !r.a.userId ? '<div class="small">sin usuario vinculado</div>' : ''}</td>
+      <td data-label="En pruebas hoy">${pnames}</td>
+      <td class="num" data-label="Casos ejecutados">${r.a.userId ? s.casos : '—'}</td><td class="num" data-label="Meta ${CASOS_META}/día">${r.a.userId ? metaTxt(r) : '<span class="small">—</span>'}</td>
+      <td class="num" data-label="Probando">${h1(s.prueba)}</td><td class="num" data-label="Bloqueado">${h1(s.bloqueado)}</td><td class="num" data-label="% bloqueo">${tp ? fmtPct(s.bloqueado / tp * 100) : '—'}</td>
+      <td class="num" data-label="Reunión / gestión">${h1(s.reunion + s.gestion)}</td><td class="num" data-label="Bugs" title="${s.bugMin} min en bugs">${s.bugs}</td>
+      <td class="num" data-label="Días registro / extra">${s.dias} / ${s.extras}</td><td data-label="Motivos de bloqueo">${esc2(motivo || '—')}</td></tr>`;
   }).join('');
-  return `<div class="panel"><div class="panel-head"><div><h2>Resumen del mes — equipo</h2><p class="hint">${monthNavLabel(bit.month)} · horas registradas por analista</p></div></div>
-    <div class="tablewrap"><table class="stack"><thead><tr><th>Analista</th><th class="num">Días</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">% bloqueo</th><th class="num">Reunión / gestión</th><th class="num">Bugs</th><th class="num">Días extras</th><th>Principales motivos de bloqueo</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  const foot = `<tr class="totrow"><td><strong>Equipo</strong></td><td></td><td class="num"><strong>${tot.casos||0}</strong></td><td class="num">${view==='dia' ? '' : (tot.exig ? `<strong>${tot.cumple}/${tot.exig}</strong> días` : '')}</td>
+      <td class="num"><strong>${h1(tot.prueba)}</strong></td><td class="num"><strong>${h1(tot.bloqueado)}</strong></td><td class="num">${(tot.prueba||0)+(tot.bloqueado||0) ? fmtPct((tot.bloqueado||0) / ((tot.prueba||0)+(tot.bloqueado||0)) * 100) : '—'}</td><td class="num">${h1((tot.reunion||0)+(tot.gestion||0))}</td><td class="num">${tot.bugs||0}</td><td class="num">${tot.extras||0} extra</td><td></td></tr>`;
+  let metaDia = '';
+  if(view==='dia'){ const ms = rows.map(r => metaOf(r.a, bit.date)); const ex = ms.filter(m => m.k==='cumple' || m.k==='incumple' || m.k==='en_curso'); metaDia = ex.length ? ms.filter(m => m.k==='cumple').length + ' de ' + ex.length + ' analista' + (ex.length===1?'':'s') + ' con proyecto en pruebas cumplen la meta' : 'Nadie tiene proyecto en pruebas con plan de Azure este día'; }
+  const sumTxt = (analistas.length + ' analista' + (analistas.length===1?'':'s') + ', ' + tot.conReg + ' con horas registradas. ') + narrativa(teamSt, view, {team:true}).replace(/^Registró/, 'Registraron').replace(/Ejecutó/, 'Ejecutaron').replace(/Cumplió/, 'Cumplieron').replace(/No ejecutó/, 'No ejecutaron') + (metaDia ? ' ' + metaDia + '.' : '');
+  return `<div class="panel"><div class="panel-head"><div><h2>Bitácora del equipo — ${esc2(periodLabel(view))}</h2><p class="hint">Resumen por analista. Haz clic en un nombre para ver su bitácora diaria, semanal y mensual, con sus proyectos y casos ejecutados.</p></div>
+      <div class="flexrow">${bitSegHtml('bit-tview', view)}${bitNavHtml(view)}</div></div>
+    <div class="daytiles">${tile('Analistas con registro', tot.conReg + ' / ' + analistas.length)}${tile('Probando', h1(tot.prueba))}${tile('Bloqueado', h1(tot.bloqueado))}${tile('Casos ejecutados', tot.casos||0, 'meta ' + CASOS_META + ' por día hábil')}${tile('Bugs reportados', tot.bugs||0, (tot.bugMin||0) + ' min')}</div>
+    <div class="banner banner-info" style="margin-bottom:14px;"><span>📝</span><span>${esc2(sumTxt)}</span></div>${window.__me ? '' : '<div style="margin-bottom:14px;">' + addAnalystForm() + '</div>'}
+    <div class="tablewrap"><table class="stack bitteam"><thead><tr><th>Analista</th><th>En pruebas</th><th class="num">Casos</th><th class="num">Meta ${CASOS_META}/día</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">% bloqueo</th><th class="num">Reunión</th><th class="num">Bugs</th><th class="num" title="Días con registro / días extras">Días reg. / extra</th><th>Motivos de bloqueo</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
+    <p class="small" style="margin:10px 0 0;">Los casos ejecutados vienen de Azure Test Plans (quién y cuándo ejecutó cada caso: exitosos, fallidos y bloqueados). La meta de ${CASOS_META} casos aplica en días hábiles en que el analista tiene un proyecto en pruebas con plan de Azure vinculado. Si un caso se vuelve a ejecutar otro día, Azure solo conserva la última ejecución.</p></div>`;
+}
+
+/* ---- vista de un analista ---- */
+function casosDayHtml(a){
+  const m = metaOf(a, bit.date), c = m.c;
+  const msg = !a.userId ? 'Esta ficha no está vinculada a un usuario: los casos de Azure se cuentan por usuario.'
+    : m.k==='sin_azure' ? 'Tiene proyecto en pruebas pero sin plan de Azure Test Plans vinculado: vincúlalo en el proyecto para medir los casos.'
+    : (!c.tot ? (m.k==='libre' ? 'Día no hábil.' : m.k==='futuro' ? '' : 'No se registraron casos ejecutados en Azure este día.') : '');
+  const rows = c.rows.map(r => `<tr><td data-label="Proyecto"><button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.p.id)}">${esc2(r.p.name)}</button></td><td class="num" data-label="Exitosos">${r.ok}</td><td class="num" data-label="Fallidos">${r.fail}</td><td class="num" data-label="Bloqueados">${r.block}</td><td class="num" data-label="Total"><strong>${r.tot}</strong></td></tr>`).join('');
+  return `<div class="casosbox"><div class="flexrow" style="justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>Casos de prueba ejecutados (Azure)</strong>${metaBadge(m)}</div>
+    ${rows ? `<div class="tablewrap"><table class="stack"><thead><tr><th>Proyecto</th><th class="num">Exitosos</th><th class="num">Fallidos</th><th class="num">Bloqueados</th><th class="num">Total</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="totrow"><td><strong>Total del día</strong></td><td class="num">${c.ok}</td><td class="num">${c.fail}</td><td class="num">${c.block}</td><td class="num"><strong>${c.tot}</strong></td></tr></tfoot></table></div>` : ''}
+    ${msg ? `<div class="small">${esc2(msg)}</div>` : ''}</div>`;
+}
+function dayCellsTable(a, st, view){
+  const rows = st.days.filter(x => view==='semana' || x.s.registrado>0 || x.m.c.tot>0 || (isBizDay(x.d) && x.d <= ymd(new Date()))).map(x => {
+    const s = x.s;
+    return `<tr><td data-label="Día"><button type="button" class="namebtn" data-act="bit-open" data-date="${x.d}">${esc2(cap(fmtYmd(x.d, {weekday:'short', day:'numeric', month:'short'})))}</button></td><td class="num" data-label="Probando">${h1(s.prueba)}</td><td class="num" data-label="Bloqueado">${h1(s.bloqueado)}</td><td class="num" data-label="Reunión / gestión">${h1(s.reunion + s.gestion)}</td><td class="num" data-label="Bugs">${s.bugs}</td><td class="num" data-label="Casos">${x.m.c.tot}</td><td data-label="Meta">${metaBadge(x.m, true)}</td></tr>`;
+  }).join('');
+  return `<div class="tablewrap" style="margin-top:14px;"><table class="stack"><thead><tr><th>Día</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">Reunión / gestión</th><th class="num">Bugs</th><th class="num">Casos</th><th>Meta ${CASOS_META}</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="small" style="padding:12px;">Sin datos en este período.</td></tr>'}</tbody>
+    <tfoot><tr class="totrow"><td><strong>Total</strong></td><td class="num">${h1(st.prueba)}</td><td class="num">${h1(st.bloqueado)}</td><td class="num">${h1(st.reunion + st.gestion)}</td><td class="num">${st.bugs}</td><td class="num"><strong>${st.casos}</strong></td><td>${st.exig ? st.cumple + '/' + st.exig + ' días' : ''}</td></tr></tfoot></table></div>`;
+}
+function analystSummaryHtml(a, view){
+  const st = periodStats(a, periodDates(view)), m = view==='dia' ? metaOf(a, bit.date) : null;
+  const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
+  const metaTile = view==='dia' ? tile('Meta ' + CASOS_META, m.k==='cumple' ? '✓' : m.k==='incumple' ? '✗' : '—', m.k==='cumple' ? 'cumplida' : m.k==='incumple' ? 'bajo la meta' : m.k==='en_curso' ? 'faltan ' + Math.max(0, CASOS_META - m.c.tot) : '') : tile('Meta ' + CASOS_META, st.exig ? fmtPct(st.cumple / st.exig * 100) : '—', st.exig ? st.cumple + ' de ' + st.exig + ' días' : 'sin días exigibles');
+  return {st, html: `<div class="panel"><div class="panel-head"><div><h2>Resumen ${VIEW_NAME[view]} — ${esc2(periodLabel(view))}</h2><p class="hint">Cómo le fue a ${esc2(a.name)}</p></div>${bitNavHtml(view)}</div>
+    <div class="daytiles">${tile('Probando', h1(st.prueba))}${tile('Bloqueado', h1(st.bloqueado))}${tile('Reunión / gestión', h1(st.reunion + st.gestion))}${tile('Bugs reportados', st.bugs, st.bugMin + ' min')}${tile('Casos ejecutados', a.userId ? st.casos : '—', st.casos ? st.ok + ' ✓ · ' + st.fail + ' ✗ · ' + st.block + ' ⛔' : '')}${metaTile}${tile('Días con registro', st.dias, st.extras ? st.extras + ' con horas extra' : '')}</div>
+    <div class="banner banner-info"><span>📝</span><span>${esc2(narrativa(st, view, {meta:m}))}</span></div></div>`};
+}
+function analystProjectsHtml(a){
+  const today = ymd(new Date()), list = analystProjects(a);
+  const groups = [['En pruebas', p => !isClosed(p) && isReceived(p) && (!toYmdLocal(p.testStart) || toYmdLocal(p.testStart) <= today)],
+                  ['Próximos a probar', p => !isClosed(p) && !(isReceived(p) && (!toYmdLocal(p.testStart) || toYmdLocal(p.testStart) <= today))],
+                  ['Cerrados', p => isClosed(p)]];
+  const last7 = []; for(let d = parseYmd(today), n = 0; n < 7 && last7.length < 7; d = addDays(d, -1), n++){ const s = ymd(d); if(isBizDay(s)) last7.push(s); }
+  const row = (p, g) => {
+    const pct = projectProgress(p), qi = qaInfo(p), q = qi && qi.c.valid ? qi.c : null, doc = azBugs.get(p.id);
+    const perDay = d => { const v = doc && doc.execDays && doc.execDays[d] && doc.execDays[d][String(a.userId)]; return v ? (v[0]|0) + (v[1]|0) + (v[2]|0) : 0; };
+    const totalP = doc && doc.execDays ? Object.keys(doc.execDays).reduce((s, d) => s + perDay(d), 0) : 0;
+    const chips = g==='En pruebas' && p.azureTest ? `<div class="flexrow" style="gap:6px;margin-top:6px;">${last7.slice().reverse().map(d => `<span class="chipcase ${perDay(d) ? 'on' : ''}" title="${esc2(fmtYmd(d))}">${esc2(fmtYmd(d, {weekday:'short', day:'numeric'}))}: <strong>${perDay(d)}</strong></span>`).join('')}</div>` : '';
+    const fin = planEnd(toYmdLocal(p.testStart), p.diasPlan);
+    const fechas = g==='Próximos a probar' ? (p.testStart ? 'Inicia pruebas ' + fmtDay(toYmdLocal(p.testStart)) : (isReceived(p) ? 'Recibido, sin fecha de inicio' : 'En backlog de QA'))
+      : g==='Cerrados' ? 'Cerrado ' + (closedAt(p) ? fmtDate(closedAt(p)) : '') : 'Pruebas desde ' + (p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—') + (fin ? ' · fin planeado ' + fmtDay(fin) : '');
+    return `<div class="projectcard" data-act="open-project" data-id="${esc2(p.id)}" role="button" tabindex="0"><div class="top"><div><h3>${esc2(p.name)}</h3><div class="meta">${esc2(fechas)} ${badgeStatus(p)}</div></div><div class="pct">${fmtPct(pct)}</div></div>
+      <div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
+      <div class="small" style="margin-top:6px;">${q ? 'QA certificado <strong>' + fmtPct(q.cert) + '</strong> · probado ' + (q.ok + q.fail) : 'Sin avance de pruebas registrado'}${p.azureTest ? ' · casos ejecutados por ' + esc2(a.name.split(' ')[0]) + ': <strong>' + totalP + '</strong>' : (g==='En pruebas' ? ' · <span style="color:var(--warn-ink)">sin plan de Azure vinculado</span>' : '')}</div>${chips}</div>`;
+  };
+  if(!a.userId) return `<div class="panel"><div class="panel-head"><div><h2>Proyectos asignados</h2></div></div><div class="small">Esta ficha no está vinculada a un usuario, por eso no tiene proyectos asignados.${isAdmin() && window.__me ? ' Crea o vincula el usuario en Administración.' : ''}</div></div>`;
+  const parts = groups.map(([name, fn]) => { const ps = list.filter(fn); return `<div style="margin-bottom:14px;"><h3 style="margin:0 0 8px;font-size:14px;">${name} <span class="small">(${ps.length})</span></h3>${ps.length ? ps.map(p => row(p, name)).join('') : '<div class="small">Ninguno.</div>'}</div>`; }).join('');
+  return `<div class="panel"><div class="panel-head"><div><h2>Proyectos asignados</h2><p class="hint">En pruebas, próximos a probar y cerrados de ${esc2(a.name)}. Los casos ejecutados salen de Azure Test Plans.</p></div></div>${parts}</div>`;
+}
+function bitAdminBox(a){
+  if(!isAdmin()) return '';
+  if(window.__me && a.userId) return `<div class="small" style="margin-top:8px;">Este analista tiene usuario: edítalo o elimínalo en <a href="/admin.html" style="color:var(--accent-strong);font-weight:600;">Administración</a>.</div>`;
+  if(bitEdit && bitEdit.id===a.id){
+    if(bitEdit.del) return `<div class="delbox" data-act="noop"><span>¿Eliminar a «${esc2(a.name)}» y todas sus horas registradas? No se puede deshacer.</span><button class="btn btn-sm btn-primary" style="background:var(--critical);border-color:var(--critical)" data-act="bit-del-yes" type="button">Sí, eliminar</button><button class="btn btn-sm btn-ghost" data-act="bit-edit-cancel" type="button">Cancelar</button></div>`;
+    return `<div class="flexrow" style="margin-top:8px;"><input type="text" data-f="bitEdit" value="${esc2(bitEdit.name)}" style="max-width:280px;" aria-label="Nombre del analista" /><button class="btn btn-sm btn-primary" data-act="bit-edit-save" type="button">Guardar nombre</button><button class="btn btn-sm btn-ghost" data-act="bit-edit-cancel" type="button">Cancelar</button></div>`;
+  }
+  return `<div class="flexrow" style="margin-top:8px;"><button class="btn btn-sm btn-ghost" data-act="bit-edit-open" type="button">✎ Editar nombre</button><button class="btn btn-sm btn-ghost" data-act="bit-del-ask" type="button">🗑 Eliminar analista</button></div>`;
+}
+function bitAnalystHtml(a, teamViewer){
+  const view = bit.view, sum = analystSummaryHtml(a, view);
+  const chips = teamViewer ? `<div class="panel tight"><div class="flexrow" style="justify-content:space-between;"><div class="flexrow"><button class="btn btn-sm" data-act="bit-team" type="button">← Equipo</button><span role="tablist" aria-label="Analistas" class="flexrow">${analistas.map(x => `<button type="button" class="tab ${x.id===a.id?'active':''}" data-act="bit-analyst" data-id="${esc2(x.id)}">${esc2(x.name)}</button>`).join('')}</span></div>${addAnalystForm()}</div>${bitAdminBox(a)}</div>` : '';
+  let main;
+  if(view==='dia') main = `<div class="panel">${dayViewHtml(a)}${casosDayHtml(a)}</div>`;
+  else if(view==='semana') main = `<div class="panel">${weekViewHtml(a)}${dayCellsTable(a, sum.st, 'semana')}</div>`;
+  else main = `<div class="panel"><div class="panel-head"><div><h2>${esc2(monthNavLabel(bit.month))}</h2><p class="hint">Día por día: horas, casos ejecutados y meta · haz clic en un día para abrirlo</p></div></div>${dayCellsTable(a, sum.st, 'mes')}</div>`;
+  return `${chips}${sum.html}
+    <div class="two-col"><div class="panel">${calendarHtml(a)}</div>
+      <div><div class="panel tight" style="margin-bottom:14px;">${bitSegHtml('bit-view', view)}</div>${main}</div></div>
+    ${analystProjectsHtml(a)}`;
+}
+/* En el artifact (sin usuarios) se pueden seguir agregando analistas a mano; en la versión web se crean en Administración. */
+function addAnalystForm(){
+  if(window.__me) return isAdmin() ? `<a href="/admin.html" class="small" style="color:var(--accent-strong);font-weight:600;">+ Crear analista (Administración)</a>` : '';
+  return `<div class="flexrow"><input type="text" id="newAnalyst" data-f="newAnalyst" placeholder="Nombre del analista" value="${esc2(bit.newName)}" style="max-width:240px;" aria-label="Nombre del nuevo analista" /><button class="btn btn-sm btn-primary" data-act="bit-add-analyst" type="button">+ Agregar analista</button></div>`;
 }
 function viewBitacora(){
-  const addForm = `<div class="flexrow"><input type="text" id="newAnalyst" data-f="newAnalyst" placeholder="Nombre del analista" value="${escapeHtml(bit.newName)}" style="max-width:240px;" aria-label="Nombre del nuevo analista" /><button class="btn btn-sm btn-primary" data-act="bit-add-analyst" type="button">+ Agregar analista</button></div>`;
+  const web = !!window.__me, teamViewer = !web || ROLE()==='admin' || ROLE()==='pmo';
   if(!analistas.length){
     return `<div class="panel"><div class="panel-head"><div><h2>Bitácora diaria</h2><p class="hint">Cada analista de QA registra su jornada hora por hora: si pudo probar o estuvo bloqueado, y los bugs que reportó.</p></div></div>
-      <div class="empty" style="text-align:left;">Aún no hay analistas. Agrega el primero para empezar${whoName()!=='Sin nombre' ? ` (por ejemplo, <strong>${escapeHtml(whoName())}</strong>)` : ''}.</div>${addForm}</div>`;
+      <div class="empty" style="text-align:left;">${web ? (isAdmin() ? 'Aún no hay analistas. Crea los usuarios con perfil <strong>Analista QA</strong> en Administración y aparecen aquí.' : 'Aún no hay analistas.') : 'Aún no hay analistas. Agrega el primero para empezar' + (whoName()!=='Sin nombre' ? ` (por ejemplo, <strong>${esc2(whoName())}</strong>)` : '') + '.'}</div>${!web ? addAnalystForm() : (isAdmin() ? addAnalystForm() : '')}</div>`;
   }
+  if(teamViewer && !bit.open) return bitTeamHtml();
   const a = analistas.find(x => x.id===bit.analystId) || analistas[0];
-  return `<div class="panel tight"><div class="flexrow" style="justify-content:space-between;">
-      <div class="flexrow" role="tablist" aria-label="Analistas">${analistas.map(x => `<button type="button" class="tab ${x.id===a.id?'active':''}" data-act="bit-analyst" data-id="${escapeHtml(x.id)}">${escapeHtml(x.name)}</button>`).join('')}</div>${addForm}</div></div>
-    <div class="two-col"><div class="panel">${calendarHtml(a)}</div>
-      <div class="panel"><div class="seg" style="margin-bottom:14px;"><button type="button" class="${bit.view==='dia'?'on':''}" data-act="bit-view" data-v="dia">Día</button><button type="button" class="${bit.view==='semana'?'on':''}" data-act="bit-view" data-v="semana">Semana</button></div>
-        ${bit.view==='dia' ? dayViewHtml(a) : weekViewHtml(a)}</div></div>
-    ${monthSummaryHtml()}`;
+  return bitAnalystHtml(a, teamViewer);
+}
+
+/* ---- ganchos ---- */
+function bitClick(act, el){
+  switch(act){
+    case 'bit-open-analyst': bit.analystId = el.dataset.id; lsSet('qacert_analyst', bit.analystId); bit.open = true; bit.bugForm = null; bitEdit = null; render(); window.scrollTo(0, 0); return true;
+    case 'bit-analyst': bit.analystId = el.dataset.id; lsSet('qacert_analyst', bit.analystId); bit.open = true; bit.bugForm = null; bitEdit = null; render(); return true;
+    case 'bit-team': bit.open = false; bitEdit = null; render(); window.scrollTo(0, 0); return true;
+    case 'bit-tview': bit.tview = el.dataset.v; if(bit.tview==='mes') bit.month = bit.date.slice(0,7); render(); return true;
+    case 'bit-view': bit.view = el.dataset.v; if(bit.view==='mes') bit.month = bit.date.slice(0,7); bit.bugForm = null; render(); return true;
+    case 'bit-edit-open': { const a = analistas.find(x => x.id===bit.analystId); if(a){ bitEdit = {id:a.id, name:a.name, del:false}; render(); } return true; }
+    case 'bit-edit-cancel': bitEdit = null; render(); return true;
+    case 'bit-del-ask': { const a = analistas.find(x => x.id===bit.analystId); if(a){ bitEdit = {id:a.id, name:a.name, del:true}; render(); } return true; }
+    case 'bit-edit-save': bitRename(); return true;
+    case 'bit-del-yes': bitDelete(); return true;
+  }
+  return false;
+}
+function bitInput(f, el){ if(f==='bitEdit'){ if(bitEdit) bitEdit.name = el.value; return true; } return false; }
+async function bitRename(){
+  const a = analistas.find(x => bitEdit && x.id===bitEdit.id); if(!a) return;
+  const name = bitEdit.name.trim(); if(!name){ toast('Escribe el nombre.'); return; }
+  if(analistas.some(x => x.id!==a.id && x.name.toLowerCase()===name.toLowerCase())){ toast('Ya existe un analista con ese nombre.'); return; }
+  bitEdit = null;
+  await guarded(() => stSet('analistas', a.id, Object.assign(stripId(a), {name})), 'Nombre actualizado');
+  render();
+}
+async function bitDelete(){
+  const a = analistas.find(x => bitEdit && x.id===bitEdit.id); if(!a) return;
+  bitEdit = null;
+  await guarded(async () => {
+    await stDel('analistas', a.id);
+    if(!window.__me){ for(const k of Array.from(bitMap.keys())) if(k.indexOf(a.id + '_')===0) await stDel('bitacora', k); }   /* en la versión web el servidor borra sus días */
+  }, 'Analista eliminado');
+  bit.open = false; bit.analystId = null; render();
 }
 
 /* ================= ROLES (la validación real está en el servidor; aquí solo se adapta la pantalla) =================
@@ -3216,7 +3475,7 @@ function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
 function defaultView(){ return ROLE()==='po' ? 'po' : 'tablero'; }
 
 /* Acciones y campos permitidos a los perfiles de solo lectura */
-const RO_ACTS = new Set(['tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
+const RO_ACTS = new Set(['bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
 const RO_FIELDS = new Set(['ambQ','azfEst','azfPri','az','pcom']);
 const ANALYST_BLOCK = new Set(['create','del-ask','del-yes','del-cancel','bit-add-analyst','asig-save']);
 function roleAllowsAct(act){
@@ -4283,7 +4542,7 @@ async function addAnalyst(){
   await guarded(async () => { id = await stAdd('analistas', {name, createdAt:new Date().toISOString(), createdBy:whoName()}); });
   if(!id) return;
   if(!analistas.some(a => a.id===id)){ analistas.push({id, name}); analistas.sort((a,b) => a.name.localeCompare(b.name,'es')); }
-  bit.analystId = id; bit.newName = ''; lsSet('qacert_analyst', id); render();
+  bit.analystId = id; bit.open = true; bit.newName = ''; lsSet('qacert_analyst', id); render();
 }
 function slotOf(s){ return bit.analystId ? ensureDay(bit.analystId, bit.date).slots[s] : null; }
 function curKey(){ return dayKey(bit.analystId, bit.date); }
@@ -4589,6 +4848,7 @@ function onClick(e){
   if(!roleAllowsAct(act) || (act==='tab' && !tabAllowed(el.dataset.tab))){ if(act!=='tab') roleDenied(); return; }
   if(act==='tab' && el.dataset.tab==='nuevo') loadRoster().then(() => { if(currentView==='nuevo') render(); });
   if(roleClick(act, el)) return;
+  if(bitClick(act, el)) return;
   if(act.indexOf('amb-')===0){ ambClick(act, el); return; }
   const sc = el.closest('[data-scope]');
   const scope = el.dataset.scope || (sc && sc.dataset.scope);
@@ -4727,7 +4987,6 @@ function onClick(e){
     case 'ans-save': saveAns(); break;
     case 'ans-reset': ansDraft = cloneJ(DEFAULT_ANS); render(); break;
     case 'copy': copyText(el.dataset.target); break;
-    case 'bit-analyst': bit.analystId = el.dataset.id; lsSet('qacert_analyst', bit.analystId); bit.bugForm = null; render(); break;
     case 'bit-add-analyst': addAnalyst(); break;
     case 'bit-day': case 'bit-open': bit.date = el.dataset.date; bit.month = bit.date.slice(0,7); bit.view = 'dia'; bit.bugForm = null; render(); break;
     case 'bit-shift': bit.date = ymd(addDays(parseYmd(bit.date), Number(el.dataset.d))); bit.month = bit.date.slice(0,7); bit.bugForm = null; render(); break;
@@ -4744,6 +5003,7 @@ function onInput(e){
   const el = e.target, f = el.dataset && el.dataset.f; if(!f) return;
   if(!roleAllowsField(f)) return;
   if(roleInput(f, el)) return;
+  if(bitInput(f, el)) return;
   if(f.indexOf('amb')===0){ ambInput(f, el); return; }
   if(el.tagName==='SELECT' || el.type==='checkbox') return;   // se manejan en 'change'
   const scope = el.dataset.scope, hi = el.dataset.hu!=null ? Number(el.dataset.hu) : null, ci = el.dataset.c!=null ? Number(el.dataset.c) : null;
