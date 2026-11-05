@@ -262,12 +262,32 @@ function stampComment(ctx, op, cur, body) {
   return Object.assign({}, cur, { texto, editedAt: new Date().toISOString() });
 }
 
+/* Lista mínima (id y nombre) de proyectos abiertos para registrar apoyo en un proyecto que no se tiene asignado. */
+app.get('/api/proyectos-apoyo', staffOnly, wrap(async (req, res) => {
+  const rows = await store.listDocs('projects');
+  res.json(rows.filter(r => r.data && !metrics.isClosed(r.data)).map(r => ({ id: r.id, name: String(r.data.name || '') })).sort((a, b) => a.name.localeCompare(b.name, 'es')));
+}));
 app.get('/api/docs/:col', colOk, wrap(async (req, res) => {
   const ctx = await ctxOf(req), col = req.params.col;
   const rows = await store.listDocs(col), out = [];
   rows.forEach(r => { const d = perm.readDoc(ctx, col, r.id, r.data); if (d != null) out.push({ id: r.id, data: d, version: r.version }); });
   res.json(out);
 }));
+/* Un analista QA puede probar como máximo 2 proyectos a la vez (abiertos = recibidos en QA y sin cerrar). Se valida cuando un proyecto pasa a contar para él:
+   al asignarlo, al recibirlo en QA o al reabrirlo. Lo ya asignado antes no se toca. */
+const MAX_PROJ_ANALISTA = 2;
+const countsFor = p => !!p && !metrics.isClosed(p) && metrics.isReceived(p);
+async function checkProjectLimit(id, cur, nxt) {
+  const a = nxt && nxt.asignacion && nxt.asignacion.analista; if (!a || a.id == null || !countsFor(nxt)) return;
+  const wasHis = cur && countsFor(cur) && cur.asignacion && cur.asignacion.analista && Number(cur.asignacion.analista.id) === Number(a.id);
+  if (wasHis) return;
+  const others = (await store.listDocs('projects')).filter(r => r.id !== id && r.data && r.data.asignacion && r.data.asignacion.analista && Number(r.data.asignacion.analista.id) === Number(a.id) && countsFor(r.data));
+  if (others.length >= MAX_PROJ_ANALISTA) throw { status: 400, msg: (a.name || 'El analista') + ' ya tiene ' + others.length + ' proyectos abiertos (' + others.slice(0, 3).map(r => r.data.name || r.id).join(' y ') + '). Un analista puede probar máximo ' + MAX_PROJ_ANALISTA + ' a la vez: cierra uno o asigna este proyecto a otro analista.' };
+}
+async function syncPname(id, name) {
+  const r = await store.getDoc('azure_bugs', id);
+  if (r && r.data && r.data.pname !== name) { const m = await store.mergeDoc('azure_bugs', id, { pname: name }, 'sistema'); broadcast({ op: 'set', col: 'azure_bugs', id, data: m.data, version: m.version }); }
+}
 /* Valida y prepara una escritura. Devuelve { data } con el documento a guardar (o { patch } en PATCH). */
 async function prepWrite(req, op, id) {
   const ctx = await ctxOf(req), col = req.params.col, curRow = id ? await store.getDoc(col, id) : null, cur = curRow ? curRow.data : null;
@@ -287,6 +307,7 @@ async function prepWrite(req, op, id) {
       if (kind === 'create' || nxt.asignacion) { nxt = Object.assign({}, nxt); nxt.asignacion = await normAsig(nxt.asignacion); if (op === 'patch') body = Object.assign({}, body, { asignacion: nxt.asignacion }); }
     }
   }
+  if (col === 'projects' && nxt && kind !== 'delete') await checkProjectLimit(id, cur, nxt);
   if (col === 'bitacora' && ctx.role === 'analista') { nxt = Object.assign({}, nxt, { analystId: ctx.analystDocId }); if (op === 'patch') body = Object.assign({}, body, { analystId: ctx.analystDocId }); }
   const pr = perm.writeProblem(ctx, col, id, kind, cur, nxt); if (pr) throw { status: 403, msg: pr };
   return { ctx, cur, data: op === 'patch' ? undefined : nxt, patch: op === 'patch' ? body : undefined };
@@ -301,12 +322,14 @@ app.put('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
   try {
     const w = await prepWrite(req, 'put', req.params.id), d = await store.setDoc(req.params.col, req.params.id, w.data, req.user.name);
     broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version });
+    if (req.params.col === 'projects') syncPname(d.id, d.data.name).catch(() => {});
   } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.patch('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
   try {
     const w = await prepWrite(req, 'patch', req.params.id), d = await store.mergeDoc(req.params.col, req.params.id, w.patch, req.user.name);
     broadcast({ op: 'set', col: req.params.col, id: d.id, data: d.data, version: d.version }); res.json({ id: d.id, version: d.version, data: perm.readDoc(w.ctx, req.params.col, d.id, d.data) });
+    if (req.params.col === 'projects') syncPname(d.id, d.data.name).catch(() => {});
   } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.delete('/api/docs/:col/:id', colOk, wrap(async (req, res) => {

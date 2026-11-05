@@ -1216,7 +1216,7 @@ const MOTIVOS = ['Ambiente','Datos de prueba','Accesos / permisos','Build / desp
 function emptySlot(k){ return { e:'libre', d: k==='12' ? 'Almuerzo' : '', m:'', bugs:[] }; }
 function emptyDay(analystId, fecha){
   const slots = {}; SLOTS.forEach(s => { slots[s.k] = emptySlot(s.k); });
-  return { analystId, fecha, slots, extras:false, extrasNota:'', updatedAt:null, updatedBy:null };
+  return { analystId, fecha, slots, extras:false, extrasNota:'', apoyo:[], updatedAt:null, updatedBy:null };
 }
 function normDay(d){
   const day = Object.assign(emptyDay(d.analystId, d.fecha), d);
@@ -2455,7 +2455,7 @@ function viewProjectDetail(){
   const source = editing ? work : p.historias;
   const certified = p.status==='certificado';
   let body = `<button class="backlink" data-act="back" type="button">← ${currentView==='cerrados' ? 'Cerrados' : 'Proyectos'}</button>`;
-  body += `<div class="panel"><div class="panel-head"><div><h2>${escapeHtml(p.name)}</h2><p class="hint">Creado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')} ${badgeStatus(p)}</p></div>
+  body += `<div class="panel"><div class="panel-head"><div>${projTitleHtml(p)}<p class="hint">Creado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')} ${badgeStatus(p)}</p></div>
     <div style="text-align:right"><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div></div></div>
     <div class="progress ${done?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
@@ -3183,15 +3183,15 @@ const h1 = n => (Math.round((Number(n)||0)*10)/10).toLocaleString('es-CO') + ' h
 
 /* ---- datos: casos ejecutados por analista y día (vienen de Azure Test Plans, guardados por el servidor) ---- */
 function casosOf(a, date){
-  const out = {tot:0, ok:0, fail:0, block:0, rows:[]};
+  const out = {tot:0, ok:0, fail:0, block:0, rows:[], apoyo:0};
   if(!a || !a.userId) return out;
   azBugs.forEach((d, pid) => {
     const v = d && d.execDays && d.execDays[date] && d.execDays[date][String(a.userId)]; if(!v) return;
     const ok = v[0]|0, fail = v[1]|0, block = v[2]|0, t = ok + fail + block; if(!t) return;
-    const p = projects.find(x => x.id===pid); if(!p) return;
-    out.rows.push({p, ok, fail, block, tot:t}); out.tot += t; out.ok += ok; out.fail += fail; out.block += block;
+    const p = projects.find(x => x.id===pid) || null, ay = isHelp(p, a);    /* sin proyecto visible = lo ayudó en un proyecto de otro analista */
+    out.rows.push({p, pid, name: p ? p.name : (d.pname || 'Proyecto'), ayuda: ay, ok, fail, block, tot:t}); out.tot += t; out.ok += ok; out.fail += fail; out.block += block; if(ay) out.apoyo += t;
   });
-  out.rows.sort((x,y) => y.tot - x.tot);
+  out.rows.sort((x,y) => (x.ayuda - y.ayuda) || (y.tot - x.tot));
   return out;
 }
 function analystProjects(a){
@@ -3248,15 +3248,16 @@ function periodLabel(view){
 }
 const VIEW_NAME = {dia:'del día', semana:'de la semana', mes:'del mes'};
 function periodStats(a, dates){
-  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, bugs:0, bugMin:0, dias:0, extras:0, motivos:{}, casos:0, ok:0, fail:0, block:0, exig:0, cumple:0, days:[]};
+  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, bugs:0, bugMin:0, dias:0, extras:0, motivos:{}, casos:0, ok:0, fail:0, block:0, exig:0, cumple:0, creados:0, apoyoH:0, apoyoCasos:0, apoyoCreados:0, days:[]};
   dates.forEach(d => {
     const day = getDay(a.id, d), s = daySummary(day), m = metaOf(a, d);
     if(s.registrado > 0) r.dias++;
     r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion; r.bugs += s.bugs; r.bugMin += s.bugMin;
     if(day){ if(day.extras) r.extras++; SLOTS.forEach(sl => { const x = day.slots[sl.k]; if(x && x.e==='bloqueado'){ const mo = x.m || 'Sin motivo'; r.motivos[mo] = (r.motivos[mo]||0) + 1; } }); }
     r.casos += m.c.tot; r.ok += m.c.ok; r.fail += m.c.fail; r.block += m.c.block;
+    const cr = creadosOf(a, d); r.creados += cr.tot; r.apoyoCreados += cr.apoyo; r.apoyoCasos += m.c.apoyo; r.apoyoH += apoyoHoras(a, d);
     if(m.k==='cumple' || m.k==='incumple'){ r.exig++; if(m.k==='cumple') r.cumple++; }
-    r.days.push({d, s, m});
+    r.days.push({d, s, m, cr: cr.tot, ah: apoyoHoras(a, d)});
   });
   r.reg = r.prueba + r.bloqueado + r.reunion + r.gestion;
   r.topMotivo = Object.entries(r.motivos).sort((x,y) => y[1]-x[1])[0];
@@ -3267,7 +3268,7 @@ function narrativa(st, view, opt){
   opt = opt || {};
   const sujeto = opt.team ? 'El equipo' : 'El analista';
   const partes = [];
-  if(!st.reg && !st.casos){
+  if(!st.reg && !st.casos && !st.creados && !st.apoyoH){
     return view==='dia' ? 'Aún no hay horas registradas ni casos ejecutados este día.' : 'No hay horas registradas ni casos ejecutados en este período.';
   }
   if(st.reg){
@@ -3279,6 +3280,8 @@ function narrativa(st, view, opt){
   }
   if(st.casos) partes.push('Ejecutó ' + st.casos + ' caso' + (st.casos===1?'':'s') + ' de prueba (' + st.ok + ' exitoso' + (st.ok===1?'':'s') + ', ' + st.fail + ' fallido' + (st.fail===1?'':'s') + ', ' + st.block + ' bloqueado' + (st.block===1?'':'s') + ').');
   else if(st.exig) partes.push('No ejecutó casos de prueba en Azure.');
+  if(st.creados) partes.push('Creó o cargó ' + st.creados + ' caso' + (st.creados===1?'':'s') + ' de prueba' + (st.apoyoCreados ? ' (' + st.apoyoCreados + ' en proyectos de apoyo)' : '') + '.');
+  if(st.apoyoH || st.apoyoCasos) partes.push('Apoyó otros proyectos' + (st.apoyoH ? ': ' + h1(st.apoyoH) + ' registradas' : '') + (st.apoyoCasos ? (st.apoyoH ? ' y ' : ': ') + st.apoyoCasos + ' caso' + (st.apoyoCasos===1?'':'s') + ' ejecutado' + (st.apoyoCasos===1?'':'s') + ' en esos proyectos' : '') + '.');
   if(view==='dia'){
     if(opt.meta) partes.push(opt.meta.k==='cumple' ? 'Cumple la meta de ' + CASOS_META + ' casos diarios.' : opt.meta.k==='incumple' ? 'No alcanzó la meta de ' + CASOS_META + ' casos diarios.' : opt.meta.k==='en_curso' ? 'Aún puede llegar a la meta de ' + CASOS_META + ' casos hoy.' : '');
   } else if(st.exig){
@@ -3299,7 +3302,7 @@ function bitSegHtml(act, cur){
 function bitTeamHtml(){
   const view = bit.tview, dates = periodDates(view);
   const rows = analistas.map(a => ({a, st: periodStats(a, dates), pr: analystProjects(a).filter(p => activeOnDay(p, ymd(new Date())))}));
-  const tot = rows.reduce((t, r) => { ['prueba','bloqueado','reunion','gestion','bugs','bugMin','casos','ok','fail','block','exig','cumple','extras'].forEach(k => { t[k] = (t[k]||0) + r.st[k]; }); t.conReg += r.st.reg ? 1 : 0; return t; }, {conReg:0});
+  const tot = rows.reduce((t, r) => { ['prueba','bloqueado','reunion','gestion','bugs','bugMin','casos','ok','fail','block','exig','cumple','extras','creados','apoyoH','apoyoCasos','apoyoCreados'].forEach(k => { t[k] = (t[k]||0) + r.st[k]; }); t.conReg += r.st.reg ? 1 : 0; return t; }, {conReg:0});
   const tn = rows.reduce((o, r) => { Object.entries(r.st.motivos).forEach(([k,v]) => { o[k] = (o[k]||0) + v; }); return o; }, {});
   const teamSt = Object.assign({}, tot, {reg: (tot.prueba||0) + (tot.bloqueado||0) + (tot.reunion||0) + (tot.gestion||0), motivos: tn, topMotivo: Object.entries(tn).sort((x,y) => y[1]-x[1])[0]});
   const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
@@ -3311,22 +3314,23 @@ function bitTeamHtml(){
     const motivo = Object.entries(s.motivos).sort((x,y) => y[1]-x[1]).slice(0,2).map(([k,v]) => k + ' (' + v + ' h)').join(', ');
     const pnames = r.pr.length ? r.pr.map(p => `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(p.id)}">${esc2(p.name)}</button>`).join(', ') : '<span class="small">—</span>';
     return `<tr><td data-label="Analista"><button type="button" class="namebtn" data-act="bit-open-analyst" data-id="${esc2(r.a.id)}">${esc2(r.a.name)}</button>${window.__me && !r.a.userId ? '<div class="small">sin usuario vinculado</div>' : ''}</td>
-      <td data-label="En pruebas hoy">${pnames}</td>
+      <td data-label="En pruebas hoy">${pnames}${r.a.userId ? '<div style="margin-top:4px;">' + loadBadge(r.a) + '</div>' : ''}</td>
       <td class="num" data-label="Casos ejecutados">${r.a.userId ? s.casos : '—'}</td><td class="num" data-label="Meta ${CASOS_META}/día">${r.a.userId ? metaTxt(r) : '<span class="small">—</span>'}</td>
+      <td class="num" data-label="Creados">${r.a.userId ? s.creados : '—'}</td><td class="num" data-label="Apoyo" title="Horas registradas · casos ejecutados en proyectos de otros analistas">${s.apoyoH || s.apoyoCasos ? (s.apoyoH ? h1(s.apoyoH) : '0 h') + ' · ' + s.apoyoCasos + ' casos' : '—'}</td>
       <td class="num" data-label="Probando">${h1(s.prueba)}</td><td class="num" data-label="Bloqueado">${h1(s.bloqueado)}</td><td class="num" data-label="% bloqueo">${tp ? fmtPct(s.bloqueado / tp * 100) : '—'}</td>
-      <td class="num" data-label="Reunión / gestión">${h1(s.reunion + s.gestion)}</td><td class="num" data-label="Bugs" title="${s.bugMin} min en bugs">${s.bugs}</td>
+      <td class="num" data-label="Bugs" title="${s.bugMin} min en bugs">${s.bugs}</td>
       <td class="num" data-label="Días registro / extra">${s.dias} / ${s.extras}</td><td data-label="Motivos de bloqueo">${esc2(motivo || '—')}</td></tr>`;
   }).join('');
-  const foot = `<tr class="totrow"><td><strong>Equipo</strong></td><td></td><td class="num"><strong>${tot.casos||0}</strong></td><td class="num">${view==='dia' ? '' : (tot.exig ? `<strong>${tot.cumple}/${tot.exig}</strong> días` : '')}</td>
-      <td class="num"><strong>${h1(tot.prueba)}</strong></td><td class="num"><strong>${h1(tot.bloqueado)}</strong></td><td class="num">${(tot.prueba||0)+(tot.bloqueado||0) ? fmtPct((tot.bloqueado||0) / ((tot.prueba||0)+(tot.bloqueado||0)) * 100) : '—'}</td><td class="num">${h1((tot.reunion||0)+(tot.gestion||0))}</td><td class="num">${tot.bugs||0}</td><td class="num">${tot.extras||0} extra</td><td></td></tr>`;
+  const foot = `<tr class="totrow"><td><strong>Equipo</strong></td><td></td><td class="num"><strong>${tot.casos||0}</strong></td><td class="num">${view==='dia' ? '' : (tot.exig ? `<strong>${tot.cumple}/${tot.exig}</strong> días` : '')}</td><td class="num"><strong>${tot.creados||0}</strong></td><td class="num">${tot.apoyoH || tot.apoyoCasos ? h1(tot.apoyoH) + ' · ' + (tot.apoyoCasos||0) + ' casos' : '—'}</td>
+      <td class="num"><strong>${h1(tot.prueba)}</strong></td><td class="num"><strong>${h1(tot.bloqueado)}</strong></td><td class="num">${(tot.prueba||0)+(tot.bloqueado||0) ? fmtPct((tot.bloqueado||0) / ((tot.prueba||0)+(tot.bloqueado||0)) * 100) : '—'}</td><td class="num">${tot.bugs||0}</td><td class="num">${tot.extras||0} extra</td><td></td></tr>`;
   let metaDia = '';
   if(view==='dia'){ const ms = rows.map(r => metaOf(r.a, bit.date)); const ex = ms.filter(m => m.k==='cumple' || m.k==='incumple' || m.k==='en_curso'); metaDia = ex.length ? ms.filter(m => m.k==='cumple').length + ' de ' + ex.length + ' analista' + (ex.length===1?'':'s') + ' con proyecto en pruebas cumplen la meta' : 'Nadie tiene proyecto en pruebas con plan de Azure este día'; }
   const sumTxt = (analistas.length + ' analista' + (analistas.length===1?'':'s') + ', ' + tot.conReg + ' con horas registradas. ') + narrativa(teamSt, view, {team:true}).replace(/^Registró/, 'Registraron').replace(/Ejecutó/, 'Ejecutaron').replace(/Cumplió/, 'Cumplieron').replace(/No ejecutó/, 'No ejecutaron') + (metaDia ? ' ' + metaDia + '.' : '');
   return `<div class="panel"><div class="panel-head"><div><h2>Bitácora del equipo — ${esc2(periodLabel(view))}</h2><p class="hint">Resumen por analista. Haz clic en un nombre para ver su bitácora diaria, semanal y mensual, con sus proyectos y casos ejecutados.</p></div>
       <div class="flexrow">${bitSegHtml('bit-tview', view)}${bitNavHtml(view)}</div></div>
-    <div class="daytiles">${tile('Analistas con registro', tot.conReg + ' / ' + analistas.length)}${tile('Probando', h1(tot.prueba))}${tile('Bloqueado', h1(tot.bloqueado))}${tile('Casos ejecutados', tot.casos||0, 'meta ' + CASOS_META + ' por día hábil')}${tile('Bugs reportados', tot.bugs||0, (tot.bugMin||0) + ' min')}</div>
+    <div class="daytiles">${tile('Analistas con registro', tot.conReg + ' / ' + analistas.length)}${tile('Probando', h1(tot.prueba))}${tile('Bloqueado', h1(tot.bloqueado))}${tile('Casos ejecutados', tot.casos||0, 'meta ' + CASOS_META + ' por día hábil' + (tot.apoyoCasos ? ' · ' + tot.apoyoCasos + ' de apoyo' : ''))}${tile('Casos creados', tot.creados||0, 'cargados en Azure')}${tile('Apoyo a otros proyectos', h1(tot.apoyoH), (tot.apoyoCasos||0) + ' casos ejecutados')}${tile('Bugs reportados', tot.bugs||0, (tot.bugMin||0) + ' min')}</div>
     <div class="banner banner-info" style="margin-bottom:14px;"><span>📝</span><span>${esc2(sumTxt)}</span></div>${window.__me ? '' : '<div style="margin-bottom:14px;">' + addAnalystForm() + '</div>'}
-    <div class="tablewrap"><table class="stack bitteam"><thead><tr><th>Analista</th><th>En pruebas</th><th class="num">Casos</th><th class="num">Meta ${CASOS_META}/día</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">% bloqueo</th><th class="num">Reunión</th><th class="num">Bugs</th><th class="num" title="Días con registro / días extras">Días reg. / extra</th><th>Motivos de bloqueo</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
+    <div class="tablewrap"><table class="stack bitteam"><thead><tr><th>Analista</th><th>En pruebas</th><th class="num">Casos</th><th class="num">Meta ${CASOS_META}/día</th><th class="num">Creados</th><th class="num" title="Horas registradas y casos ejecutados en proyectos de otros analistas">Apoyo</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">% bloqueo</th><th class="num">Bugs</th><th class="num" title="Días con registro / días extras">Días reg. / extra</th><th>Motivos de bloqueo</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>
     <p class="small" style="margin:10px 0 0;">Los casos ejecutados vienen de Azure Test Plans (quién y cuándo ejecutó cada caso: exitosos, fallidos y bloqueados). La meta de ${CASOS_META} casos aplica en días hábiles en que el analista tiene un proyecto en pruebas con plan de Azure vinculado. Si un caso se vuelve a ejecutar otro día, Azure solo conserva la última ejecución.</p></div>`;
 }
 
@@ -3336,7 +3340,7 @@ function casosDayHtml(a){
   const msg = !a.userId ? 'Esta ficha no está vinculada a un usuario: los casos de Azure se cuentan por usuario.'
     : m.k==='sin_azure' ? 'Tiene proyecto en pruebas pero sin plan de Azure Test Plans vinculado: vincúlalo en el proyecto para medir los casos.'
     : (!c.tot ? (m.k==='libre' ? 'Día no hábil.' : m.k==='futuro' ? '' : 'No se registraron casos ejecutados en Azure este día.') : '');
-  const rows = c.rows.map(r => `<tr><td data-label="Proyecto"><button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.p.id)}">${esc2(r.p.name)}</button></td><td class="num" data-label="Exitosos">${r.ok}</td><td class="num" data-label="Fallidos">${r.fail}</td><td class="num" data-label="Bloqueados">${r.block}</td><td class="num" data-label="Total"><strong>${r.tot}</strong></td></tr>`).join('');
+  const rows = c.rows.map(r => `<tr><td data-label="Proyecto">${r.p ? `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.pid)}">${esc2(r.name)}</button>` : esc2(r.name)}${r.ayuda ? ' <span class="badge badge-parcial"><span class="dot"></span>Apoyo</span>' : ''}</td><td class="num" data-label="Exitosos">${r.ok}</td><td class="num" data-label="Fallidos">${r.fail}</td><td class="num" data-label="Bloqueados">${r.block}</td><td class="num" data-label="Total"><strong>${r.tot}</strong></td></tr>`).join('');
   return `<div class="casosbox"><div class="flexrow" style="justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>Casos de prueba ejecutados (Azure)</strong>${metaBadge(m)}</div>
     ${rows ? `<div class="tablewrap"><table class="stack"><thead><tr><th>Proyecto</th><th class="num">Exitosos</th><th class="num">Fallidos</th><th class="num">Bloqueados</th><th class="num">Total</th></tr></thead><tbody>${rows}</tbody><tfoot><tr class="totrow"><td><strong>Total del día</strong></td><td class="num">${c.ok}</td><td class="num">${c.fail}</td><td class="num">${c.block}</td><td class="num"><strong>${c.tot}</strong></td></tr></tfoot></table></div>` : ''}
     ${msg ? `<div class="small">${esc2(msg)}</div>` : ''}</div>`;
@@ -3344,17 +3348,17 @@ function casosDayHtml(a){
 function dayCellsTable(a, st, view){
   const rows = st.days.filter(x => view==='semana' || x.s.registrado>0 || x.m.c.tot>0 || (isBizDay(x.d) && x.d <= ymd(new Date()))).map(x => {
     const s = x.s;
-    return `<tr><td data-label="Día"><button type="button" class="namebtn" data-act="bit-open" data-date="${x.d}">${esc2(cap(fmtYmd(x.d, {weekday:'short', day:'numeric', month:'short'})))}</button></td><td class="num" data-label="Probando">${h1(s.prueba)}</td><td class="num" data-label="Bloqueado">${h1(s.bloqueado)}</td><td class="num" data-label="Reunión / gestión">${h1(s.reunion + s.gestion)}</td><td class="num" data-label="Bugs">${s.bugs}</td><td class="num" data-label="Casos">${x.m.c.tot}</td><td data-label="Meta">${metaBadge(x.m, true)}</td></tr>`;
+    return `<tr><td data-label="Día"><button type="button" class="namebtn" data-act="bit-open" data-date="${x.d}">${esc2(cap(fmtYmd(x.d, {weekday:'short', day:'numeric', month:'short'})))}</button></td><td class="num" data-label="Probando">${h1(s.prueba)}</td><td class="num" data-label="Bloqueado">${h1(s.bloqueado)}</td><td class="num" data-label="Reunión / gestión">${h1(s.reunion + s.gestion)}</td><td class="num" data-label="Bugs">${s.bugs}</td><td class="num" data-label="Casos">${x.m.c.tot}</td><td class="num" data-label="Creados">${x.cr}</td><td class="num" data-label="Apoyo">${x.ah ? h1(x.ah) : '—'}</td><td data-label="Meta">${metaBadge(x.m, true)}</td></tr>`;
   }).join('');
-  return `<div class="tablewrap" style="margin-top:14px;"><table class="stack"><thead><tr><th>Día</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">Reunión / gestión</th><th class="num">Bugs</th><th class="num">Casos</th><th>Meta ${CASOS_META}</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="small" style="padding:12px;">Sin datos en este período.</td></tr>'}</tbody>
-    <tfoot><tr class="totrow"><td><strong>Total</strong></td><td class="num">${h1(st.prueba)}</td><td class="num">${h1(st.bloqueado)}</td><td class="num">${h1(st.reunion + st.gestion)}</td><td class="num">${st.bugs}</td><td class="num"><strong>${st.casos}</strong></td><td>${st.exig ? st.cumple + '/' + st.exig + ' días' : ''}</td></tr></tfoot></table></div>`;
+  return `<div class="tablewrap" style="margin-top:14px;"><table class="stack"><thead><tr><th>Día</th><th class="num">Probando</th><th class="num">Bloqueado</th><th class="num">Reunión / gestión</th><th class="num">Bugs</th><th class="num">Casos</th><th class="num">Creados</th><th class="num">Apoyo</th><th>Meta ${CASOS_META}</th></tr></thead><tbody>${rows || '<tr><td colspan="9" class="small" style="padding:12px;">Sin datos en este período.</td></tr>'}</tbody>
+    <tfoot><tr class="totrow"><td><strong>Total</strong></td><td class="num">${h1(st.prueba)}</td><td class="num">${h1(st.bloqueado)}</td><td class="num">${h1(st.reunion + st.gestion)}</td><td class="num">${st.bugs}</td><td class="num"><strong>${st.casos}</strong></td><td class="num"><strong>${st.creados}</strong></td><td class="num">${st.apoyoH ? h1(st.apoyoH) : '—'}</td><td>${st.exig ? st.cumple + '/' + st.exig + ' días' : ''}</td></tr></tfoot></table></div>`;
 }
 function analystSummaryHtml(a, view){
   const st = periodStats(a, periodDates(view)), m = view==='dia' ? metaOf(a, bit.date) : null;
   const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
   const metaTile = view==='dia' ? tile('Meta ' + CASOS_META, m.k==='cumple' ? '✓' : m.k==='incumple' ? '✗' : '—', m.k==='cumple' ? 'cumplida' : m.k==='incumple' ? 'bajo la meta' : m.k==='en_curso' ? 'faltan ' + Math.max(0, CASOS_META - m.c.tot) : '') : tile('Meta ' + CASOS_META, st.exig ? fmtPct(st.cumple / st.exig * 100) : '—', st.exig ? st.cumple + ' de ' + st.exig + ' días' : 'sin días exigibles');
   return {st, html: `<div class="panel"><div class="panel-head"><div><h2>Resumen ${VIEW_NAME[view]} — ${esc2(periodLabel(view))}</h2><p class="hint">Cómo le fue a ${esc2(a.name)}</p></div>${bitNavHtml(view)}</div>
-    <div class="daytiles">${tile('Probando', h1(st.prueba))}${tile('Bloqueado', h1(st.bloqueado))}${tile('Reunión / gestión', h1(st.reunion + st.gestion))}${tile('Bugs reportados', st.bugs, st.bugMin + ' min')}${tile('Casos ejecutados', a.userId ? st.casos : '—', st.casos ? st.ok + ' ✓ · ' + st.fail + ' ✗ · ' + st.block + ' ⛔' : '')}${metaTile}${tile('Días con registro', st.dias, st.extras ? st.extras + ' con horas extra' : '')}</div>
+    <div class="daytiles">${tile('Probando', h1(st.prueba))}${tile('Bloqueado', h1(st.bloqueado))}${tile('Reunión / gestión', h1(st.reunion + st.gestion))}${tile('Bugs reportados', st.bugs, st.bugMin + ' min')}${tile('Casos ejecutados', a.userId ? st.casos : '—', st.casos ? st.ok + ' ✓ · ' + st.fail + ' ✗ · ' + st.block + ' ⛔' + (st.apoyoCasos ? ' · ' + st.apoyoCasos + ' de apoyo' : '') : '')}${tile('Casos creados', a.userId ? st.creados : '—', st.apoyoCreados ? st.apoyoCreados + ' de apoyo' : 'cargados en Azure')}${tile('Apoyo a otros', h1(st.apoyoH), st.apoyoCasos ? st.apoyoCasos + ' casos ejecutados' : 'horas registradas')}${metaTile}${tile('Días con registro', st.dias, st.extras ? st.extras + ' con horas extra' : '')}</div>
     <div class="banner banner-info"><span>📝</span><span>${esc2(narrativa(st, view, {meta:m}))}</span></div></div>`};
 }
 function analystProjectsHtml(a){
@@ -3366,6 +3370,7 @@ function analystProjectsHtml(a){
   const row = (p, g) => {
     const pct = projectProgress(p), qi = qaInfo(p), q = qi && qi.c.valid ? qi.c : null, doc = azBugs.get(p.id);
     const perDay = d => { const v = doc && doc.execDays && doc.execDays[d] && doc.execDays[d][String(a.userId)]; return v ? (v[0]|0) + (v[1]|0) + (v[2]|0) : 0; };
+    const totalC = doc && doc.createDays ? Object.keys(doc.createDays).reduce((s, d) => s + ((doc.createDays[d] && doc.createDays[d][String(a.userId)]) || 0), 0) : 0;
     const totalP = doc && doc.execDays ? Object.keys(doc.execDays).reduce((s, d) => s + perDay(d), 0) : 0;
     const chips = g==='En pruebas' && p.azureTest ? `<div class="flexrow" style="gap:6px;margin-top:6px;">${last7.slice().reverse().map(d => `<span class="chipcase ${perDay(d) ? 'on' : ''}" title="${esc2(fmtYmd(d))}">${esc2(fmtYmd(d, {weekday:'short', day:'numeric'}))}: <strong>${perDay(d)}</strong></span>`).join('')}</div>` : '';
     const fin = planEnd(toYmdLocal(p.testStart), p.diasPlan);
@@ -3373,11 +3378,11 @@ function analystProjectsHtml(a){
       : g==='Cerrados' ? 'Cerrado ' + (closedAt(p) ? fmtDate(closedAt(p)) : '') : 'Pruebas desde ' + (p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—') + (fin ? ' · fin planeado ' + fmtDay(fin) : '');
     return `<div class="projectcard" data-act="open-project" data-id="${esc2(p.id)}" role="button" tabindex="0"><div class="top"><div><h3>${esc2(p.name)}</h3><div class="meta">${esc2(fechas)} ${badgeStatus(p)}</div></div><div class="pct">${fmtPct(pct)}</div></div>
       <div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
-      <div class="small" style="margin-top:6px;">${q ? 'QA certificado <strong>' + fmtPct(q.cert) + '</strong> · probado ' + (q.ok + q.fail) : 'Sin avance de pruebas registrado'}${p.azureTest ? ' · casos ejecutados por ' + esc2(a.name.split(' ')[0]) + ': <strong>' + totalP + '</strong>' : (g==='En pruebas' ? ' · <span style="color:var(--warn-ink)">sin plan de Azure vinculado</span>' : '')}</div>${chips}</div>`;
+      <div class="small" style="margin-top:6px;">${q ? 'QA certificado <strong>' + fmtPct(q.cert) + '</strong> · probado ' + (q.ok + q.fail) : 'Sin avance de pruebas registrado'}${p.azureTest ? ' · casos ejecutados por ' + esc2(a.name.split(' ')[0]) + ': <strong>' + totalP + '</strong> · creados: <strong>' + totalC + '</strong>' : (g==='En pruebas' ? ' · <span style="color:var(--warn-ink)">sin plan de Azure vinculado</span>' : '')}</div>${chips}</div>`;
   };
   if(!a.userId) return `<div class="panel"><div class="panel-head"><div><h2>Proyectos asignados</h2></div></div><div class="small">Esta ficha no está vinculada a un usuario, por eso no tiene proyectos asignados.${isAdmin() && window.__me ? ' Crea o vincula el usuario en Administración.' : ''}</div></div>`;
   const parts = groups.map(([name, fn]) => { const ps = list.filter(fn); return `<div style="margin-bottom:14px;"><h3 style="margin:0 0 8px;font-size:14px;">${name} <span class="small">(${ps.length})</span></h3>${ps.length ? ps.map(p => row(p, name)).join('') : '<div class="small">Ninguno.</div>'}</div>`; }).join('');
-  return `<div class="panel"><div class="panel-head"><div><h2>Proyectos asignados</h2><p class="hint">En pruebas, próximos a probar y cerrados de ${esc2(a.name)}. Los casos ejecutados salen de Azure Test Plans.</p></div></div>${parts}</div>`;
+  return `<div class="panel"><div class="panel-head"><div><h2>Proyectos asignados</h2><p class="hint">En pruebas, próximos a probar y cerrados de ${esc2(a.name)}. Los casos ejecutados y creados salen de Azure Test Plans.</p></div><div>${loadBadge(a)}</div></div>${parts}</div>`;
 }
 function bitAdminBox(a){
   if(!isAdmin()) return '';
@@ -3392,10 +3397,11 @@ function bitAnalystHtml(a, teamViewer){
   const view = bit.view, sum = analystSummaryHtml(a, view);
   const chips = teamViewer ? `<div class="panel tight"><div class="flexrow" style="justify-content:space-between;"><div class="flexrow"><button class="btn btn-sm" data-act="bit-team" type="button">← Equipo</button><span role="tablist" aria-label="Analistas" class="flexrow">${analistas.map(x => `<button type="button" class="tab ${x.id===a.id?'active':''}" data-act="bit-analyst" data-id="${esc2(x.id)}">${esc2(x.name)}</button>`).join('')}</span></div>${addAnalystForm()}</div>${bitAdminBox(a)}</div>` : '';
   let main;
-  if(view==='dia') main = `<div class="panel">${dayViewHtml(a)}${casosDayHtml(a)}</div>`;
+  if(view==='dia') main = `<div class="panel">${dayViewHtml(a)}${apoyoDayHtml(a)}${casosDayHtml(a)}${creadosDayHtml(a)}</div>`;
   else if(view==='semana') main = `<div class="panel">${weekViewHtml(a)}${dayCellsTable(a, sum.st, 'semana')}</div>`;
   else main = `<div class="panel"><div class="panel-head"><div><h2>${esc2(monthNavLabel(bit.month))}</h2><p class="hint">Día por día: horas, casos ejecutados y meta · haz clic en un día para abrirlo</p></div></div>${dayCellsTable(a, sum.st, 'mes')}</div>`;
-  return `${chips}${sum.html}
+  loadApoyoProjects();
+  return `${chips}${sum.html}${actividadHtml(a, view)}
     <div class="two-col"><div class="panel">${calendarHtml(a)}</div>
       <div><div class="panel tight" style="margin-bottom:14px;">${bitSegHtml('bit-view', view)}</div>${main}</div></div>
     ${analystProjectsHtml(a)}`;
@@ -3418,6 +3424,7 @@ function viewBitacora(){
 
 /* ---- ganchos ---- */
 function bitClick(act, el){
+  if(apoyoClick(act, el)) return true;
   switch(act){
     case 'bit-open-analyst': bit.analystId = el.dataset.id; lsSet('qacert_analyst', bit.analystId); bit.open = true; bit.bugForm = null; bitEdit = null; render(); window.scrollTo(0, 0); return true;
     case 'bit-analyst': bit.analystId = el.dataset.id; lsSet('qacert_analyst', bit.analystId); bit.open = true; bit.bugForm = null; bitEdit = null; render(); return true;
@@ -3432,7 +3439,7 @@ function bitClick(act, el){
   }
   return false;
 }
-function bitInput(f, el){ if(f==='bitEdit'){ if(bitEdit) bitEdit.name = el.value; return true; } return false; }
+function bitInput(f, el){ if(f==='bitEdit'){ if(bitEdit) bitEdit.name = el.value; return true; } return apoyoInput(f, el); }
 async function bitRename(){
   const a = analistas.find(x => bitEdit && x.id===bitEdit.id); if(!a) return;
   const name = bitEdit.name.trim(); if(!name){ toast('Escribe el nombre.'); return; }
@@ -3449,6 +3456,170 @@ async function bitDelete(){
     if(!window.__me){ for(const k of Array.from(bitMap.keys())) if(k.indexOf(a.id + '_')===0) await stDel('bitacora', k); }   /* en la versión web el servidor borra sus días */
   }, 'Analista eliminado');
   bit.open = false; bit.analystId = null; render();
+}
+/* ================= APOYO A OTROS PROYECTOS, CASOS CREADOS Y LÍMITE DE 2 PROYECTOS ================= */
+const MAX_PROY_ANALISTA = 2;
+let apoyoProjects = null;                       // [{id,name}] proyectos abiertos (para elegir dónde se apoyó)
+let apoyoDraft = {pid:'', otro:'', h:'', nota:''};
+let apoyoLoading = false;
+
+/* ¿El proyecto es de apoyo para este analista? (no lo tiene asignado). Si el proyecto no se puede ver, es de apoyo. */
+function isHelp(p, a){
+  if(!p) return true;
+  const an = p.asignacion && p.asignacion.analista; if(!an) return false;
+  return Number(an.id) !== Number(a.userId);
+}
+function creadosOf(a, date){
+  const out = {tot:0, apoyo:0, rows:[]};
+  if(!a || !a.userId) return out;
+  const u = String(a.userId);
+  azBugs.forEach((d, pid) => {
+    const n = d && d.createDays && d.createDays[date] && d.createDays[date][u]; if(!n) return;
+    const p = projects.find(x => x.id===pid), ay = isHelp(p, a);
+    out.rows.push({p: p || null, pid, name: p ? p.name : (d.pname || 'Proyecto'), ayuda: ay, n}); out.tot += n; if(ay) out.apoyo += n;
+  });
+  out.rows.sort((x,y) => y.n - x.n);
+  return out;
+}
+function apoyoEntries(a, date){ const d = getDay(a.id, date); return d && Array.isArray(d.apoyo) ? d.apoyo : []; }
+function apoyoHoras(a, date){ return apoyoEntries(a, date).reduce((s, x) => s + (Number(x.h)||0), 0); }
+
+/* ---- límite de 2 proyectos abiertos (recibidos y sin cerrar) ---- */
+function analystOpenProjects(a){ return analystProjects(a).filter(p => !isClosed(p) && isReceived(p)); }
+function loadLabel(userId){
+  const n = projects.filter(p => p.asignacion && p.asignacion.analista && Number(p.asignacion.analista.id)===Number(userId) && !isClosed(p) && isReceived(p)).length;
+  return n + '/' + MAX_PROY_ANALISTA + ' en curso';
+}
+function loadBadge(a){
+  if(!a.userId) return '';
+  const n = analystOpenProjects(a).length, cls = n > MAX_PROY_ANALISTA ? 'ans-incumple' : n===MAX_PROY_ANALISTA ? 'ans-en_curso' : 'ans-cumple';
+  return `<span class="badge ${cls}" title="Un analista puede probar máximo ${MAX_PROY_ANALISTA} proyectos abiertos a la vez"><span class="dot"></span>${n} de ${MAX_PROY_ANALISTA} proyectos en curso${n > MAX_PROY_ANALISTA ? ' · excede el límite' : ''}</span>`;
+}
+
+/* ---- proyectos donde se puede registrar apoyo ---- */
+async function loadApoyoProjects(){
+  if(apoyoProjects || apoyoLoading) return;
+  if(!window.__me){ apoyoProjects = projects.filter(p => !isClosed(p)).map(p => ({id:p.id, name:p.name})); return; }
+  apoyoLoading = true;
+  try{
+    const r = await fetch('/api/proyectos-apoyo', {credentials:'same-origin'});
+    apoyoProjects = r.ok ? await r.json() : [];
+  }catch(e){ apoyoProjects = []; }
+  apoyoLoading = false; render();
+}
+function apoyoChoices(a){
+  const base = apoyoProjects || (window.__me ? [] : projects.filter(p => !isClosed(p)).map(p => ({id:p.id, name:p.name})));
+  const own = new Set(analystProjects(a).map(p => p.id));
+  return base.filter(x => !own.has(x.id));
+}
+function canEditApoyo(){ return !window.__me || roleAllowsAct('apoyo-add'); }
+
+/* ---- vista del día: apoyo registrado + detectado ---- */
+function apoyoDayHtml(a){
+  const list = apoyoEntries(a, bit.date), c = casosOf(a, bit.date), cr = creadosOf(a, bit.date);
+  const horas = apoyoHoras(a, bit.date), edit = canEditApoyo();
+  const det = [];
+  if(c.apoyo) det.push('<strong>' + c.apoyo + '</strong> caso' + (c.apoyo===1?'':'s') + ' ejecutado' + (c.apoyo===1?'':'s'));
+  if(cr.apoyo) det.push('<strong>' + cr.apoyo + '</strong> caso' + (cr.apoyo===1?'':'s') + ' creado' + (cr.apoyo===1?'':'s'));
+  const detTxt = det.length ? `<div class="banner banner-info" style="margin:8px 0;"><span>🤝</span><span>Azure detectó actividad de apoyo en proyectos que no tiene asignados: ${det.join(' y ')}. Se muestra más abajo, con la etiqueta «Apoyo».</span></div>` : '';
+  const rows = list.map((x, i) => `<tr><td data-label="Proyecto">${esc2(x.pn || 'Otro proyecto')}</td><td class="num" data-label="Horas">${h1(x.h)}</td><td data-label="Nota">${esc2(x.nota || '—')}</td><td>${edit ? `<button class="btn btn-sm btn-ghost" data-act="apoyo-del" data-i="${i}" type="button" aria-label="Quitar apoyo">Quitar</button>` : ''}</td></tr>`).join('');
+  const ch = apoyoChoices(a);
+  const form = edit ? `<div class="rowgrid" style="margin-top:10px;align-items:end;">
+      <div><label class="field-label" for="apoyoPid">Proyecto en el que ayudó</label><select id="apoyoPid" data-f="apoyoPid"><option value="">Elige…</option>${ch.map(x => `<option value="${esc2(x.id)}" ${apoyoDraft.pid===x.id?'selected':''}>${esc2(x.name)}</option>`).join('')}<option value="__otro" ${apoyoDraft.pid==='__otro'?'selected':''}>Otro (escribir nombre)</option></select></div>
+      ${apoyoDraft.pid==='__otro' ? `<div><label class="field-label" for="apoyoOtro">Nombre del proyecto</label><input type="text" id="apoyoOtro" data-f="apoyoOtro" value="${esc2(apoyoDraft.otro)}" maxlength="80" /></div>` : ''}
+      <div><label class="field-label" for="apoyoH">Horas</label><input type="number" id="apoyoH" data-f="apoyoH" min="0.25" max="12" step="0.25" value="${esc2(apoyoDraft.h)}" placeholder="Ej. 2" /></div>
+      <div><label class="field-label" for="apoyoNota">En qué ayudó (opcional)</label><input type="text" id="apoyoNota" data-f="apoyoNota" value="${esc2(apoyoDraft.nota)}" maxlength="160" placeholder="Ej. Ejecución de regresión" /></div>
+      <div><button class="btn btn-sm btn-primary" data-act="apoyo-add" type="button">+ Registrar apoyo</button></div></div>` : '';
+  return `<div class="casosbox"><div class="flexrow" style="justify-content:space-between;align-items:center;margin-bottom:6px;"><strong>Apoyo a otros proyectos</strong><span class="small">${horas ? h1(horas) + ' registradas hoy' : 'Sin horas de apoyo registradas'}</span></div>
+    <p class="small" style="margin:0 0 6px;">Si ayudó a probar un proyecto de otro analista, registre aquí el proyecto y cuánto tiempo. Sus casos ejecutados o creados en ese proyecto ya se detectan solos desde Azure.</p>
+    ${detTxt}${rows ? `<div class="tablewrap"><table class="stack"><thead><tr><th>Proyecto</th><th class="num">Horas</th><th>Nota</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}${form}</div>`;
+}
+/* ---- vista del día: casos creados / cargados ---- */
+function creadosDayHtml(a){
+  const cr = creadosOf(a, bit.date);
+  if(!a.userId) return '';
+  const rows = cr.rows.map(r => `<tr><td data-label="Proyecto">${r.p ? `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.pid)}">${esc2(r.name)}</button>` : esc2(r.name)}</td><td data-label="Participación">${r.ayuda ? '<span class="badge badge-parcial"><span class="dot"></span>Apoyo</span>' : '<span class="small">Asignado</span>'}</td><td class="num" data-label="Casos creados"><strong>${r.n}</strong></td></tr>`).join('');
+  return `<div class="casosbox"><div class="flexrow" style="justify-content:space-between;align-items:center;margin-bottom:8px;"><strong>Casos de prueba creados o cargados (Azure)</strong><span class="small">${cr.tot ? cr.tot + ' en el día' : ''}</span></div>
+    ${rows ? `<div class="tablewrap"><table class="stack"><thead><tr><th>Proyecto</th><th>Participación</th><th class="num">Casos creados</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="small">No se registraron casos de prueba creados por este analista en Azure este día.</div>'}</div>`;
+}
+
+/* ---- actividad por proyecto en el período (día, semana o mes) ---- */
+function actividadPeriodo(a, dates){
+  const map = new Map();
+  const get = (pid, name, p) => { if(!map.has(pid)) map.set(pid, {pid, name, p, ayuda: isHelp(p, a), ej:0, ok:0, fail:0, block:0, cr:0, h:0, asignado: !!p && !isHelp(p, a)}); return map.get(pid); };
+  analystOpenProjects(a).forEach(p => get(p.id, p.name, p));
+  dates.forEach(d => {
+    const c = casosOf(a, d); c.rows.forEach(r => { const x = get(r.pid, r.name, r.p); x.ej += r.tot; x.ok += r.ok; x.fail += r.fail; x.block += r.block; });
+    creadosOf(a, d).rows.forEach(r => { get(r.pid, r.name, r.p).cr += r.n; });
+    apoyoEntries(a, d).forEach(e => { const pid = e.pid && e.pid!=='__otro' ? e.pid : 'otro:' + (e.pn || ''); const x = get(pid, e.pn || 'Otro proyecto', projects.find(p => p.id===e.pid) || null); if(!x.asignado) x.ayuda = true; x.h += Number(e.h)||0; });
+  });
+  return Array.from(map.values()).sort((x, y) => (x.ayuda - y.ayuda) || ((y.ej + y.cr) - (x.ej + x.cr)) || x.name.localeCompare(y.name, 'es'));
+}
+function actividadHtml(a, view){
+  if(!a.userId && !periodDates(view).some(d => apoyoEntries(a, d).length)) return '';
+  const rows = actividadPeriodo(a, periodDates(view));
+  const tot = rows.reduce((t, r) => { t.ej += r.ej; t.cr += r.cr; t.h += r.h; t.apoyoEj += r.ayuda ? r.ej : 0; t.apoyoCr += r.ayuda ? r.cr : 0; return t; }, {ej:0, cr:0, h:0, apoyoEj:0, apoyoCr:0});
+  const body = rows.map(r => `<tr><td data-label="Proyecto">${r.p && r.asignado || (r.p && isAdmin()) ? `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.pid)}">${esc2(r.name)}</button>` : esc2(r.name)}</td>
+      <td data-label="Participación">${r.ayuda ? '<span class="badge badge-parcial"><span class="dot"></span>Apoyo</span>' : '<span class="badge badge-activo"><span class="dot"></span>Asignado</span>'}</td>
+      <td class="num" data-label="Casos ejecutados">${r.ej ? '<strong>' + r.ej + '</strong> <span class="small">(' + r.ok + '✓ ' + r.fail + '✗ ' + r.block + '⛔)</span>' : '0'}</td>
+      <td class="num" data-label="Casos creados">${r.cr || 0}</td><td class="num" data-label="Horas de apoyo">${r.h ? h1(r.h) : '—'}</td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><div><h2>Actividad por proyecto — ${esc2(periodLabel(view))}</h2><p class="hint">Casos ejecutados y creados en cada proyecto (asignado o de apoyo) y horas de apoyo registradas.</p></div><div>${loadBadge(a)}</div></div>
+    ${body ? `<div class="tablewrap"><table class="stack"><thead><tr><th>Proyecto</th><th>Participación</th><th class="num">Casos ejecutados</th><th class="num">Casos creados</th><th class="num">Horas de apoyo</th></tr></thead><tbody>${body}</tbody>
+      <tfoot><tr class="totrow"><td><strong>Total</strong></td><td></td><td class="num"><strong>${tot.ej}</strong>${tot.apoyoEj ? ' <span class="small">(' + tot.apoyoEj + ' de apoyo)</span>' : ''}</td><td class="num"><strong>${tot.cr}</strong>${tot.apoyoCr ? ' <span class="small">(' + tot.apoyoCr + ' de apoyo)</span>' : ''}</td><td class="num">${tot.h ? h1(tot.h) : '—'}</td></tr></tfoot></table></div>` : '<div class="small">Sin proyectos ni actividad en este período.</div>'}</div>`;
+}
+
+/* ---- ganchos ---- */
+function apoyoClick(act, el){
+  switch(act){
+    case 'proj-rename': { const p = currentProject(); if(p){ renameState = {pid:p.id, name:p.name}; render(); const i = $('[data-f="projRename"]'); if(i){ i.focus(); i.select(); } } return true; }
+    case 'proj-rename-cancel': renameState = null; render(); return true;
+    case 'proj-rename-save': projRenameSave(); return true;
+    case 'apoyo-add': apoyoAdd(); return true;
+    case 'apoyo-del': { const d = ensureDay(bit.analystId, bit.date); if(Array.isArray(d.apoyo)){ d.apoyo.splice(Number(el.dataset.i), 1); queueSave(curKey()); render(); } return true; }
+  }
+  return false;
+}
+function apoyoInput(f, el){
+  switch(f){
+    case 'projRename': if(renameState) renameState.name = el.value; return true;
+    case 'apoyoPid': apoyoDraft.pid = el.value; return true;
+    case 'apoyoOtro': apoyoDraft.otro = el.value; return true;
+    case 'apoyoH': apoyoDraft.h = el.value; return true;
+    case 'apoyoNota': apoyoDraft.nota = el.value; return true;
+  }
+  return false;
+}
+function apoyoChange(f, el){ if(f==='apoyoPid'){ apoyoDraft.pid = el.value; render(); return true; } return apoyoInput(f, el); }
+function apoyoAdd(){
+  const a = analistas.find(x => x.id===bit.analystId); if(!a) return;
+  const h = Number(String(apoyoDraft.h).replace(',', '.'));
+  if(!apoyoDraft.pid){ toast('Elige el proyecto en el que ayudó.'); return; }
+  const otro = String(apoyoDraft.otro || '').trim();
+  if(apoyoDraft.pid==='__otro' && !otro){ toast('Escribe el nombre del proyecto.'); return; }
+  if(!(h >= 0.25 && h <= 12)){ toast('Indica las horas de apoyo (entre 0,25 y 12).'); return; }
+  const ch = (apoyoProjects || []).find(x => x.id===apoyoDraft.pid) || projects.find(x => x.id===apoyoDraft.pid);
+  const day = ensureDay(a.id, bit.date); day.apoyo = Array.isArray(day.apoyo) ? day.apoyo : [];
+  day.apoyo.push({id: uid(), pid: apoyoDraft.pid, pn: apoyoDraft.pid==='__otro' ? otro.slice(0, 80) : (ch ? ch.name : 'Proyecto'), h: Math.round(h*100)/100, nota: String(apoyoDraft.nota || '').trim().slice(0, 160), at: new Date().toISOString()});
+  apoyoDraft = {pid:'', otro:'', h:'', nota:''};
+  queueSave(curKey()); render();
+}
+
+/* ================= RENOMBRAR PROYECTO ================= */
+let renameState = null;     // {pid, name}
+function canRenameProject(){ return !window.__me || roleAllowsAct('proj-rename'); }
+function projTitleHtml(p){
+  if(renameState && renameState.pid===p.id) return `<div class="flexrow" style="align-items:center;"><input type="text" data-f="projRename" value="${esc2(renameState.name)}" maxlength="120" style="min-width:260px;font-size:17px;font-weight:700;" aria-label="Nuevo nombre del proyecto" /><button class="btn btn-sm btn-primary" data-act="proj-rename-save" type="button">Guardar</button><button class="btn btn-sm btn-ghost" data-act="proj-rename-cancel" type="button">Cancelar</button></div>`;
+  return `<div class="flexrow" style="align-items:center;gap:8px;"><h2 style="margin:0;">${esc2(p.name)}</h2>${canRenameProject() ? `<button class="btn btn-sm btn-ghost" data-act="proj-rename" data-id="${esc2(p.id)}" type="button" title="Cambiar el nombre del proyecto">✎ Cambiar nombre</button>` : ''}</div>`;
+}
+async function projRenameSave(){
+  const p = currentProject(); if(!p || !renameState) return;
+  const name = String(renameState.name || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+  if(!name){ toast('Escribe el nombre del proyecto.'); return; }
+  if(name===p.name){ renameState = null; render(); return; }
+  if(projects.some(x => x.id!==p.id && String(x.name).trim().toLowerCase()===name.toLowerCase())){ toast('Ya existe otro proyecto con ese nombre.'); return; }
+  renameState = null;
+  await patchProject(np => { np.name = name; });
+  toast('Nombre actualizado');
 }
 
 /* ================= ROLES (la validación real está en el servidor; aquí solo se adapta la pantalla) =================
@@ -3531,11 +3702,11 @@ function asigNewHtml(){
   const sel = ([k, label, role]) => {
     const us = asigOptions(role);
     return `<div><label class="field-label">${label}</label>${us.length
-      ? `<select data-f="draftAsig" data-k="${k}"><option value="">Elige…</option>${us.map(u => `<option value="${escapeHtml(String(u.id))}" ${String(draft.asig[k]||'')===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}</select>`
+      ? `<select data-f="draftAsig" data-k="${k}"><option value="">Elige…</option>${us.map(u => `<option value="${escapeHtml(String(u.id))}" ${String(draft.asig[k]||'')===String(u.id)?'selected':''}>${escapeHtml(u.name + (role==='analista' ? ' · ' + loadLabel(u.id) : ''))}</option>`).join('')}</select>`
       : `<div class="small" style="color:var(--critical);">No hay usuarios con el perfil «${ROLE_LABELS[role]}». Créalos en Administración y vuelve aquí.</div>`}</div>`;
   };
   return `<div style="margin-bottom:14px;"><div class="rowgrid g3">${ASIG_KEYS.map(sel).join('')}</div>
-    <p class="small" style="margin:6px 0 0;">Solo estas personas verán el proyecto (además del administrador y la PMO). El analista QA es quien lo aprueba y lo prueba.</p></div>`;
+    <p class="small" style="margin:6px 0 0;">Solo estas personas verán el proyecto (además del administrador y la PMO). El analista QA es quien lo aprueba y lo prueba. Un analista puede probar máximo 2 proyectos abiertos a la vez: se valida al asignar y al recibir el proyecto en QA.</p></div>`;
 }
 function asigNewOk(){ return !roster || ASIG_KEYS.every(k => draft.asig && draft.asig[k[0]]); }
 function asigFromIds(ids){
@@ -3550,7 +3721,7 @@ function asigPanel(p){
     const val = k => f ? (f[k]||'') : (a && a[k] ? String(a[k].id) : '');
     const complete = ASIG_KEYS.every(k => val(k[0]));
     const changed = !!f && ASIG_KEYS.some(k => String(f[k[0]]||'') !== (a && a[k[0]] ? String(a[k[0]].id) : ''));
-    const sel = ([k, label, role]) => `<div><label class="field-label">${label}</label><select data-f="asig" data-k="${k}"><option value="">Elige…</option>${asigOptions(role, a && a[k]).map(u => `<option value="${escapeHtml(String(u.id))}" ${val(k)===String(u.id)?'selected':''}>${escapeHtml(u.name)}</option>`).join('')}</select></div>`;
+    const sel = ([k, label, role]) => `<div><label class="field-label">${label}</label><select data-f="asig" data-k="${k}"><option value="">Elige…</option>${asigOptions(role, a && a[k]).map(u => `<option value="${escapeHtml(String(u.id))}" ${val(k)===String(u.id)?'selected':''}>${escapeHtml(u.name + (role==='analista' ? ' · ' + loadLabel(u.id) : ''))}</option>`).join('')}</select></div>`;
     return `<div class="panel"><div class="panel-head"><div><h2>Asignación</h2><p class="hint">${a ? 'Quién ve y trabaja este proyecto.' : 'Este proyecto no tiene asignación: solo el administrador y la PMO lo ven. Asígnalo para que el PMO líder, el analista y el PO lo vean.'}</p></div>
       <button class="btn btn-sm btn-primary" data-act="asig-save" type="button" ${complete && changed ? '' : 'disabled'}>Guardar asignación</button></div>
       <div class="rowgrid g3">${ASIG_KEYS.map(sel).join('')}</div></div>`;
@@ -5053,6 +5224,7 @@ function onChange(e){
   const f = el.dataset && el.dataset.f; if(!f) return;
   if(!roleAllowsField(f)){ roleDenied(); return; }
   if(roleChange(f, el)) return;
+  if(apoyoChange(f, el)) return;
   if(f.indexOf('amb')===0){ ambChange(f, el); return; }
   if(el.tagName!=='SELECT' && el.type!=='checkbox') return;
   switch(f){
