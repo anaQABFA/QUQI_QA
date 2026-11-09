@@ -35,3 +35,11 @@ services:
         sync: false
       - key: AZURE_SYNC_MINUTES  # cada cuántos minutos se actualizan los bugs solos (mínimo 5)
         value: "30"
+      - key: AZURE_DEVOPS_PAT_WRITE  # Ambientes: llave con Work Items → Read & Write para crear y cerrar los Issues (si falta, se usa AZURE_DEVOPS_PAT)
+        sync: false
+      - key: AMB_MAIL_URL        # Ambientes: URL /exec del servicio de correo de Apps Script (ver apps_script_correo.gs)
+        sync: false
+      - key: AMB_MAIL_SECRET     # Ambientes: la misma clave que pusiste en las propiedades del Apps Script
+        sync: false
+      - key: AMB_REMINDER_MINUTES  # cada cuántos minutos se revisan los recordatorios automáticos
+        value: "10"

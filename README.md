@@ -153,6 +153,27 @@ Se envía la llave en la cabecera `Authorization: Bearer <llave>` (o `X-API-Key`
 - **Proyecto congelado:** un proyecto congelado por la prioridad de otro **sigue visible** en la bandeja y en la bitácora del analista con la marca ❄; no se cuenta entre los 12 casos de la meta mientras esté congelado.
 - **Rol analista QA:** ya no ve la pestaña «Azure y ANS» (sigue en administrador, PMO y PMO líder).
 
+## 6i. Ambientes QA sin Excel: perfil «Ambientes», Issues y correos automáticos
+
+- **Qué cambió:** ya no hace falta subir el Excel. Cada servicio es una fila en la pestaña **Ambientes**; quien tenga permiso cambia el estado (**SI**, **NO**, **OCASIONALMENTE**, **MUY INTERMITENTE**) y el aplicativo hace lo mismo que el script de Google Sheets: guarda la fecha y el historial, y registra el incidente en el **Histórico**.
+  - **SI:** crea el **Issue en Azure DevOps** (mismo título, área, iteración, etiqueta, flujo funcional y responsable por hoja) y envía el **correo de incidente** con el número del Issue.
+  - **NO / OCASIONALMENTE / MUY INTERMITENTE** sobre una fila que estaba en SI: **cierra el Issue** (estado «Cerrado») y envía el **correo de cierre**.
+  - **Recordatorios:** el servidor envía solo el recordatorio cada 24 h (configurable) mientras el incidente siga abierto. Los incidentes que ya estaban abiertos al activar el envío automático cuentan desde ese momento, para no mandar de golpe todos los recordatorios atrasados.
+  - Si Azure o el correo fallan, el cambio de estado **sí se guarda**; el incidente muestra ⚠ y un botón **Reintentar** (no duplica lo que ya salió bien).
+- **Perfil nuevo «Ambientes»:** se crea en Administración. Ve **solo** la pestaña Ambientes: marca estados, ve incidentes, histórico (y lo exporta). No ve proyectos, no entra a Configuración ni carga Excel. El PO y el analista también pueden marcar; el PMO solo mira.
+- **Catálogo sin Excel (administrador):** en cada hoja, **＋ Agregar fila**, ✎ editar y 🗑 quitar (no deja quitar una fila con falla abierta). El Excel solo sirve para la primera carga (Configuración → «Reemplazar con otro Excel»).
+- **Variables en Render (todas secretas):**
+
+| Variable | Para qué |
+|---|---|
+| `AZURE_DEVOPS_PAT_WRITE` | Llave de Azure con **Work Items → Read & Write** para crear/cerrar Issues. Si no existe se usa `AZURE_DEVOPS_PAT` (solo lectura: no alcanza). |
+| `AZURE_DEVOPS_ORG` | Organización (si falta, la de Ambientes → Configuración: `BancoFinandina`). |
+| `AMB_MAIL_URL` y `AMB_MAIL_SECRET` | Servicio de correo: publica `apps_script_correo.gs` (instrucciones al inicio del archivo) y copia aquí la URL `/exec` y la clave. Los correos salen desde tu cuenta de Google como hoy. |
+| `AMB_REMINDERS=off` | (Opcional) apaga los recordatorios automáticos. `AMB_REMINDER_MINUTES` (10) = cada cuánto se revisan. |
+
+- **Sin configurar:** si falta alguna variable, el cambio de estado igual funciona y la pantalla muestra «Hacerlo a mano» (copiar datos del Issue y correo), como antes. Ambientes → Configuración muestra qué está activo.
+- **Importante:** (1) cualquier llave pegada en un chat, correo o script compartido debe **revocarse** y crearse otra; las llaves viven solo en Render. (2) Mientras el Excel de Google siga con su disparador activo se enviarían **correos dobles**: apágalo cuando empieces a usar el aplicativo. (3) El correo se envía solo a direcciones `@bancofinandina.com`. (4) Cuota de Google: ~1.500 destinatarios/día en Workspace (cada correo cuenta por destinatario).
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.

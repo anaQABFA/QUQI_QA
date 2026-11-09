@@ -25,14 +25,14 @@
   <div id="bkBanner"></div>
 
   <section class="card"><h2>Usuarios</h2>
-    <p class="small" style="margin:0">Cada analista entra con su usuario y contraseña. Al crear o restablecer una clave, la persona debe cambiarla en su primer ingreso. <b>Perfiles:</b> Administrador (todo) · PMO (ve todo, sin editar) · PMO líder (solo sus proyectos, sin editar ni bitácora) · Analista QA (sus proyectos, edita; no crea ni borra proyectos) · PO (ve el avance de sus proyectos, comenta y reporta fallas de ambientes). Los proyectos se asignan al crearlos (o después, en el detalle del proyecto).</p>
+    <p class="small" style="margin:0">Cada analista entra con su usuario y contraseña. Al crear o restablecer una clave, la persona debe cambiarla en su primer ingreso. <b>Perfiles:</b> Administrador (todo) · PMO (ve todo, sin editar) · PMO líder (solo sus proyectos, sin editar ni bitácora) · Analista QA (sus proyectos, edita; no crea ni borra proyectos) · PO (ve el avance de sus proyectos, comenta y reporta fallas de ambientes) · Ambientes (solo gestiona los ambientes de QA: marca si fallan o no y consulta el histórico). Los proyectos se asignan al crearlos (o después, en el detalle del proyecto).</p>
     <div class="tbl"><table><thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th>Último ingreso</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
     <h3 style="font-size:14px;margin-top:20px">Nuevo usuario</h3>
     <form id="fNew" class="row" autocomplete="off">
       <div><label for="nu">Usuario</label><input id="nu" placeholder="ej. jperez" required></div>
       <div><label for="nn">Nombre completo</label><input id="nn" placeholder="Juan Pérez" required></div>
       <div><label for="np">Contraseña temporal</label><input id="np" type="text" placeholder="mín. 10, letras y números" required></div>
-      <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista QA</option><option value="po">PO</option><option value="pmo_lider">PMO líder</option><option value="pmo">PMO</option><option value="admin">Administrador</option></select></div>
+      <div><label for="nr">Rol</label><select id="nr"><option value="analista">Analista QA</option><option value="po">PO</option><option value="pmo_lider">PMO líder</option><option value="pmo">PMO</option><option value="ambientes">Ambientes</option><option value="admin">Administrador</option></select></div>
       <div id="nlBox" style="display:none"><label for="nl">Vincular con analista ya registrado en la bitácora</label><select id="nl"><option value="">— Crear ficha nueva —</option></select></div>
       <div><button class="primary" type="submit" style="width:100%">Crear usuario</button></div>
     </form>
@@ -87,7 +87,7 @@ async function api(method, url, body){
 }
 const fmt = s => s ? new Date(s).toLocaleString('es-CO', { dateStyle:'medium', timeStyle:'short' }) : '—';
 let me = null;
-const ROLES = { admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO' };
+const ROLES = { admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO', ambientes:'Ambientes' };
 
 async function loadMe(){
   me = await api('GET', '/api/me');

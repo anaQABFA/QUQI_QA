@@ -7,11 +7,10 @@ const auth = require('./lib/auth');
 const store = require('./lib/store');
 const ai = require('./lib/ai');
 const azure = require('./lib/azure');
+const ambientes = require('./lib/ambientes');
 const perm = require('./lib/perm');
 const apikeys = require('./lib/apikeys');
 const metrics = require('./lib/metrics');
-const novedades = require('./lib/novedades');
-const { dayCO } = require('./lib/azure');
 
 if (String(process.env.SESSION_SECRET || '').length < 32) { console.error('Falta SESSION_SECRET (mínimo 32 caracteres aleatorios).'); process.exit(1); }
 
@@ -93,27 +92,10 @@ app.use('/api/integracion', wrap(async (req, res, next) => {
   keyHits.set(k.id, h);
   req.apiKey = k; next();
 }));
-/* Novedades del seguimiento de un proyecto (o de todos), con su id. */
-async function segEntries(projectId) {
-  const r = projectId
-    ? await db.q("SELECT id, data FROM docs WHERE col='seguimiento' AND data->>'projectId'=$1", [projectId])
-    : await db.q("SELECT id, data FROM docs WHERE col='seguimiento'");
-  return r.rows.map(x => Object.assign({}, x.data, { id: x.id }));
-}
 async function integracionRows() {
   const pr = (await db.q("SELECT id, data, updated_at FROM docs WHERE col='projects'")).rows;
   const az = new Map((await db.q("SELECT id, data FROM docs WHERE col='azure_bugs'")).rows.map(r => [r.id, r.data]));
-  const segs = new Map();
-  (await segEntries()).forEach(e => { const k = e.projectId; if (!segs.has(k)) segs.set(k, []); segs.get(k).push(e); });
-  const now = new Date(), today = dayCO(now.toISOString());
-  return pr.map(r => {
-    const p = r.data || {}, a = az.get(r.id), b = novedades.bugsDe(p, a);
-    return Object.assign(metrics.summarize(r, a, now), {
-      tiempoPruebas: novedades.tiempoPruebas(p, segs.get(r.id) || [], today),
-      bugs: { vinculado: b.vinculado, total: b.total, abiertos: b.abiertos },
-      planPruebasUrl: novedades.planPruebasUrl(p, a),
-    });
-  }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  return pr.map(r => metrics.summarize(r, az.get(r.id), new Date())).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 }
 app.get('/api/integracion/proyectos', wrap(async (req, res) => {
   let list = await integracionRows();
@@ -129,23 +111,6 @@ app.get('/api/integracion/proyectos/:id', wrap(async (req, res) => {
   const p = (await integracionRows()).find(x => x.id === req.params.id);
   if (!p) return res.status(404).json({ error: 'No existe un proyecto con ese id.' });
   res.json(Object.assign({ generadoEn: new Date().toISOString() }, p));
-}));
-
-/* Detalle de un proyecto: bugs de Azure vinculados, seguimiento (novedades) y cambios de alcance. Solo lectura. */
-app.get('/api/integracion/proyectos/:id/detalle', wrap(async (req, res) => {
-  const row = (await db.q("SELECT id, data, updated_at FROM docs WHERE col='projects' AND id=$1", [req.params.id])).rows[0];
-  if (!row) return res.status(404).json({ error: 'No existe un proyecto con ese id.' });
-  const azr = (await db.q("SELECT data FROM docs WHERE col='azure_bugs' AND id=$1", [req.params.id])).rows[0];
-  const p = row.data || {}, az = azr && azr.data, entries = await segEntries(req.params.id);
-  const today = dayCO(new Date().toISOString()), s = novedades.seguimientoDe(entries, today);
-  res.json({
-    generadoEn: new Date().toISOString(), id: row.id, nombre: p.name || '',
-    bugs: novedades.bugsDe(p, az),
-    seguimiento: s.seguimiento,
-    alcance: s.alcance,
-    planPruebasUrl: novedades.planPruebasUrl(p, az),
-    tiempoPruebas: novedades.tiempoPruebas(p, entries, today),
-  });
 }));
 
 /* ---------- puerta de acceso ---------- */
@@ -179,6 +144,7 @@ app.get('/api/me', wrap(async (req, res) => {
   const u = req.user;
   const mctx = u.must_change ? null : await ctxOf(req).catch(() => null);
   res.json({ user: { id: u.id, username: u.username, name: u.name, role: u.role, roleLabel: perm.ROLE_LABEL[u.role] || u.role, mustChange: u.must_change, analystDocId: mctx ? mctx.analystDocId : null }, ai: { enabled: ai.enabled(), model: ai.enabled() ? ai.MODEL : null },
+    ambientes: ambientes.status(),
     azure: { enabled: azure.enabled(), org: azure.enabled() ? azure.org() : null, project: azure.defaultProject() || null, testProject: azure.testProject() || null, syncMinutes: azure.syncMinutes() },
     backup: u.role === 'admin' ? await backupInfo() : null });
 }));
@@ -530,6 +496,25 @@ app.post('/api/admin/restore', adminOnly, wrap(async (req, res) => {
   res.json(stat);
 }));
 
+/* ---------- Ambientes QA: estado de una fila → histórico + Issue en Azure + correo ---------- */
+const ambOk = (req, res, next) => ['admin', 'analista', 'po', 'ambientes'].includes(req.user.role) ? next() : res.status(403).json({ error: 'Tu perfil no gestiona los ambientes.' });
+const ambHits = new Map();
+function ambRate(uid) {
+  const now = Date.now(), arr = (ambHits.get(uid) || []).filter(t => now - t < 300000);
+  if (arr.length >= 40) { ambHits.set(uid, arr); return false; }
+  arr.push(now); ambHits.set(uid, arr); return true;
+}
+app.get('/api/ambientes/estado', ambOk, (req, res) => res.json(ambientes.status()));
+app.post('/api/ambientes/marcar', ambOk, wrap(async (req, res) => {
+  if (!ambRate(req.user.id)) return res.status(429).json({ error: 'Demasiados cambios seguidos; espera unos minutos.' });
+  try { res.json(await ambientes.setEstado(req.user, req.body, broadcast)); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
+}));
+app.post('/api/ambientes/reintentar', ambOk, wrap(async (req, res) => {
+  if (!ambRate(req.user.id)) return res.status(429).json({ error: 'Demasiados intentos seguidos; espera unos minutos.' });
+  try { res.json(await ambientes.reintentar(req.user, req.body && req.body.id, broadcast)); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
+}));
+app.post('/api/ambientes/recordatorios', adminOnly, wrap(async (req, res) => res.json(await ambientes.runReminders(broadcast))));
+
 app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: '1h', setHeaders: (res, f) => { if (/\.(html|js)$/.test(f) && !/vendor/.test(f)) res.setHeader('Cache-Control', 'no-cache'); } }));
 app.use((req, res) => res.status(404).type('text').send('No encontrado'));
 
@@ -539,5 +524,5 @@ app.use((req, res) => res.status(404).type('text').send('No encontrado'));
   perm.loadPA(await store.listDocs('projects'));
   for (const u of (await db.q("SELECT id, name, role FROM users WHERE role='analista' AND active")).rows) { try { await ensureAnalyst(u); } catch (e) { console.error('Ficha de bitácora de ' + u.name + ': ' + e.message); } }
   const port = process.env.PORT || 3000;
-  app.listen(port, () => { azure.startScheduler(broadcast, analystsList); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
+  app.listen(port, () => { azure.startScheduler(broadcast, analystsList); ambientes.startScheduler(broadcast); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
 })().catch(e => { console.error('No se pudo iniciar:', e.message); process.exit(1); });

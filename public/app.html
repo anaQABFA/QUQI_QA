@@ -1431,7 +1431,7 @@ function ambDefaults(){
     correos: AMB_CORREOS_DEF.join(', '),
     evidenciaUrl: 'https://docs.google.com/spreadsheets/d/1qZUDKW2nHN11ArlwxA9LhLOx_271q5wCrmOjUMONeAU/edit?gid=1330488244#gid=1330488244',
     horasRecordatorio: 24,
-    azure: { org:'BancoFinandina', proyecto:'Gestion Proyectos', area:'Gestion Proyectos\\QA', iteracion:'Gestion Proyectos\\Backlog', etiqueta:'Ambiente QA', flujo:'QA' },
+    azure: { org:'BancoFinandina', proyecto:'Gestion Proyectos', area:'Gestion Proyectos\\QA', iteracion:'Gestion Proyectos\\Backlog', etiqueta:'Ambiente QA', flujo:'QA', estadoCierre:'Cerrado' },
     resp: JSON.parse(JSON.stringify(AMB_RESP_DEF))
   };
 }
@@ -1671,7 +1671,7 @@ let toastTimer = null;
 function toast(msg){
   const el = $('#toast'); if(!el) return;
   el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), Math.max(2600, Math.min(9000, String(msg).length * 60)));
 }
 
 /* ================= almacenamiento (db compartida o memoria local) ================= */
@@ -3722,9 +3722,10 @@ async function reqUpload(file){
 
 /* ================= ROLES (la validación real está en el servidor; aquí solo se adapta la pantalla) =================
    admin: todo · pmo: ve todo, no edita · pmo_lider: solo sus proyectos, no edita, sin bitácora
-   analista: sus proyectos, edita todo menos crear/borrar proyectos · po: % de entrega y de QA, comenta y reporta ambientes.
+   analista: sus proyectos, edita todo menos crear/borrar proyectos · po: % de entrega y de QA, comenta y reporta ambientes
+   ambientes: solo la pestaña Ambientes (marca si fallan o no, ocasional o intermitente; histórico).
    Sin servidor (artifact) no hay sesión: se comporta como administrador. */
-const ROLE_LABELS = {admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO'};
+const ROLE_LABELS = {admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO', ambientes:'Ambientes'};
 let comentarios = [], roster = null, asigForm = null;
 const pcomDraft = {};
 function ME(){ return (window.__me && window.__me.user) || null; }
@@ -3737,31 +3738,37 @@ const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','C
 function tabsForRole(){
   const r = ROLE();
   if(r==='po') return [['po','Mis proyectos'],['ambientes','Ambientes']];
+  if(r==='ambientes') return [['ambientes','Ambientes']];
   const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo','azure']})[r] || [];
   return TABS_ALL.filter(t => hide.indexOf(t[0])<0);
 }
 function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
-function defaultView(){ return ROLE()==='po' ? 'po' : 'tablero'; }
+function defaultView(){ const r = ROLE(); return r==='po' ? 'po' : r==='ambientes' ? 'ambientes' : 'tablero'; }
 
 /* Acciones y campos permitidos a los perfiles de solo lectura */
 const RO_ACTS = new Set(['bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','file-dl','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
+/* El perfil Ambientes solo gestiona los ambientes de QA */
+const AMB_ACTS = new Set(['tab','noop','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-rec-done','amb-sent','amb-notice-close','amb-export','amb-retry']);
+const AMB_FIELDS = new Set(['ambQ','ambEst','ambIssue']);
 const RO_FIELDS = new Set(['ambQ','azfEst','azfPri','az','pcom']);
 const ANALYST_BLOCK = new Set(['create','del-ask','del-yes','del-cancel','bit-add-analyst','asig-save']);
 function roleAllowsAct(act){
   const r = ROLE();
   if(r==='admin') return true;
   if(r==='analista') return !ANALYST_BLOCK.has(act);
+  if(r==='ambientes') return AMB_ACTS.has(act);
   return RO_ACTS.has(act);
 }
 function roleAllowsField(f){
   const r = ROLE();
   if(r==='admin') return true;
   if(r==='analista') return f!=='newAnalyst' && f!=='draftAsig' && f!=='asig';
+  if(r==='ambientes') return AMB_FIELDS.has(f);
   return RO_FIELDS.has(f) || (r==='po' && f==='ambEst');
 }
 function roleDenied(){
   const r = ROLE();
-  toast(r==='po' ? 'Tu perfil (PO) solo puede ver el avance, comentar y reportar fallas de ambientes.' : r==='analista' ? 'Esta acción es solo del administrador.' : 'Tu perfil es de solo lectura.');
+  toast(r==='ambientes' ? 'Tu perfil (Ambientes) solo marca el estado de los ambientes y consulta el histórico.' : r==='po' ? 'Tu perfil (PO) solo puede ver el avance, comentar y reportar fallas de ambientes.' : r==='analista' ? 'Esta acción es solo del administrador.' : 'Tu perfil es de solo lectura.');
 }
 /* Pasada visual tras cada render: oculta lo que el perfil no puede usar. */
 function applyRoleUI(){
@@ -3779,7 +3786,7 @@ function applyRoleUI(){
     const f = el.dataset && el.dataset.f;
     if(!f || !roleAllowsField(f)) el.disabled = true;
   });
-  if(r==='po') $$('.chipbtn[data-act="amb-tab"][data-t="config"]', app).forEach(el => el.remove());
+  if(r==='po' || r==='ambientes') $$('.chipbtn[data-act="amb-tab"][data-t="config"]', app).forEach(el => el.remove());
   if(r==='po') $$('.incbody', app).forEach(el => { el.innerHTML = '<div class="small">QA recibe tu reporte y se encarga del Issue en Azure DevOps y del aviso por correo.</div>'; });
 }
 
@@ -4212,6 +4219,9 @@ let ambProg = null;                      // progreso de importación {done,total
 let ambImportMsg = '';
 let ambCfgDraft = null;                  // copia editable de la configuración
 let ambReplace = false;                  // modo "reemplazar con otro Excel"
+let ambNS = null, ambSrv = null;         // servidor de Ambientes (solo versión web): crea/cierra el Issue y envía el correo
+let ambBusy = false;                     // un cambio de estado en curso
+let ambRowEdit = null, ambRowDel = null; // edición de filas del catálogo (administrador)
 
 function ambNowIso(){ return new Date().toISOString(); }
 function deepMergeJ(a, b){
@@ -4233,7 +4243,10 @@ async function ambPool(items, n, fn){
   let i = 0;
   await Promise.all(Array.from({length: Math.min(n, items.length)}, async () => { while(i < items.length){ const k = i++; await fn(items[k], k); } }));
 }
-function ambOpenList(){ return ambOpenIncidents(ambHojas, ambHist, ambNowIso(), ambCfg.horasRecordatorio); }
+function ambOpenList(){
+  const l = ambOpenIncidents(ambHojas, ambHist, ambNowIso(), ambCfg.horasRecordatorio);
+  return ambSrv && ambSrv.recordatorios ? l.map(i => Object.assign({}, i, {vencido:false})) : l;   /* los recordatorios salen solos desde el servidor */
+}
 function ambOpenCount(){ let n = 0; ambHojas.forEach(h => Object.keys(h.rows||{}).forEach(k => { if(ambIsSI(h.rows[k].est)) n++; })); return n; }
 function ambIncKey(i){ return i.hojaId + '|' + i.rk; }
 function ambFindInc(k){ return ambOpenList().find(i => ambIncKey(i)===k) || null; }
@@ -4272,6 +4285,7 @@ async function ambImportFile(file){
 
 /* ---------- cambio de estado (equivale a editar la columna C en Sheets) ---------- */
 async function ambSetEstado(hojaId, rk, nuevo){
+  if(ambNS) return ambSetEstadoSrv(hojaId, rk, nuevo);
   const h = ambHojas.find(x => x.id===hojaId); if(!h) return;
   const row = h.rows[rk]; if(!row) return;
   const old = row.est, t = ambTransicion(old, nuevo);
@@ -4296,6 +4310,42 @@ async function ambSetEstado(hojaId, rk, nuevo){
     await ambRetry(() => stUpd('amb_hojas', hojaId, { rows: { [rk]: patch } }));
   });
   render();
+}
+/* Texto del resultado de un cambio: qué se hizo y qué quedó pendiente */
+function ambResultMsg(r){
+  const w = [];
+  if(r.accion==='sin_cambio') return 'Sin cambios.';
+  if(r.accion==='estado') return 'Estado guardado.';
+  const cierra = r.accion==='cierra' || (r.accion==='reintento' && r.cierre);
+  let m = cierra ? 'Incidente solucionado' : 'Incidente registrado';
+  if(r.issueEstado==='ok') m += cierra ? (r.issue ? ' · Issue #' + r.issue + ' cerrado en Azure' : '') : ' · Issue #' + r.issue + ' creado en Azure';
+  else if(r.issueEstado==='sin_config') m += ' · Azure sin configurar: ' + (cierra ? 'cierra' : 'crea') + ' el Issue a mano';
+  else if(r.issueEstado==='sin_issue') m += ' · no tenía Issue asociado';
+  else if(r.issueEstado==='error') w.push(cierra ? 'no se pudo cerrar el Issue' : 'no se pudo crear el Issue');
+  if(r.correoEstado==='ok') m += ' · correo enviado';
+  else if(r.correoEstado==='sin_config') m += ' · correo sin configurar: cópialo a mano';
+  else if(r.correoEstado==='error') w.push('no se pudo enviar el correo');
+  return w.length ? m + ' · ⚠ ' + w.join(' y ') + ' (puedes reintentar en el incidente o el histórico)' : m;
+}
+async function ambSetEstadoSrv(hojaId, rk, nuevo){
+  if(ambBusy){ toast('Espera un momento: se está procesando otro cambio.'); render(); return; }
+  const h = ambHojas.find(x => x.id===hojaId), row = h && h.rows[rk]; if(!row || String(row.est||'')===String(nuevo||'')){ return; }
+  ambBusy = true; toast(ambIsSI(nuevo) ? 'Registrando la falla: creando el Issue y enviando el correo…' : 'Guardando…'); render();
+  try{
+    const r = await ambNS.marcar(hojaId, rk, nuevo);
+    if(r.accion==='abre'){ openDetails.add('ambinc:' + hojaId + '|' + rk); ambNotice = null; }
+    else if(r.accion==='cierra'){ ambNotice = (r.correoEstado==='ok' && r.issueEstado!=='error' && r.issueEstado!=='sin_config') ? null : {id: r.recId}; }
+    toast(ambResultMsg(r));
+  }catch(e){ console.error(e); toast(e && e.message ? e.message : 'No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.'); }
+  ambBusy = false; render();
+}
+async function ambRetryRec(id){
+  if(!ambNS || ambBusy) return;
+  const rec = ambHist.find(x => x.id===id); if(!rec) return;
+  ambBusy = true; toast('Reintentando…'); render();
+  try{ const r = await ambNS.reintentar(id); r.cierre = !ambIsSI(rec.falla); toast(ambResultMsg(r)); }
+  catch(e){ console.error(e); toast(e && e.message ? e.message : 'No se pudo reintentar.'); }
+  ambBusy = false; render();
 }
 async function ambSetIssue(k, value){
   const inc = ambFindInc(k); if(!inc) return;
@@ -4387,6 +4437,70 @@ async function ambExport(){
   catch(err){ const c = err && err.code; toast(c==='declined' ? 'Descarga cancelada.' : c==='rate_limited' ? 'Espera un momento y vuelve a intentarlo.' : 'No se pudo descargar el archivo.'); }
 }
 
+
+/* ---------- estado del servidor (qué se envía solo) ---------- */
+function ambSrvStatusHtml(){
+  if(!ambNS) return '';
+  const s = ambSrv || {}, chip = (ok, on, off) => `<span class="badge ${ok ? 'badge-recibida' : 'badge-parcial'}"><span class="dot"></span>${ok ? on : off}</span>`;
+  return `<div class="small" style="margin:4px 0 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Envío automático:</b> ${chip(s.azure, 'Issues en Azure: activo', 'Issues en Azure: sin llave de escritura')} ${chip(s.correo, 'Correo: activo', 'Correo: sin configurar')} ${chip(s.recordatorios, 'Recordatorios cada ' + ambCfg.horasRecordatorio + ' h: activos', 'Recordatorios: apagados')}
+    <span>Las llaves y el servicio de correo se configuran en Render (variables de entorno), no aquí.</span></div>`;
+}
+function ambHistEnvio(r){
+  if(!ambNS || !r.falla) return '';
+  const bad = r.issueEstado==='error' || r.correoEstado==='error';
+  if(!bad && r.enviado) return '';
+  const why = [r.issueEstado==='error' ? 'Issue: ' + (r.issueError || 'error') : '', r.correoEstado==='error' ? 'Correo: ' + (r.correoError || 'error') : '', r.correoEstado==='sin_config' ? 'correo sin configurar' : ''].filter(Boolean).join(' · ');
+  return `<div class="small" style="margin-bottom:4px;">${why ? '⚠ ' + escapeHtml(why) : ''}${bad ? ` <button class="btn btn-sm" data-act="amb-retry" data-k="${escapeHtml(r.id)}" type="button" ${ambBusy ? 'disabled' : ''}>Reintentar</button>` : ''}</div>`;
+}
+
+/* ---------- catálogo de filas (administrador): agregar, editar y quitar servicios sin Excel ---------- */
+function ambRowNew(hojaId){
+  const h = ambHojas.find(x => x.id===hojaId); if(!h) return;
+  ambRowEdit = { h:hojaId, r:null, c:['','','','','',''] }; ambRowDel = null; render();
+}
+function ambRowStart(hojaId, rk){
+  const h = ambHojas.find(x => x.id===hojaId), row = h && h.rows[rk]; if(!row) return;
+  ambRowEdit = { h:hojaId, r:rk, c:row.c.slice(0, 6) }; ambRowDel = null; render();
+}
+function ambRowPanel(h, cols){
+  const e = ambRowEdit && ambRowEdit.h===h.id ? ambRowEdit : null, d = ambRowDel && ambRowDel.h===h.id ? ambRowDel : null;
+  if(d){
+    const row = h.rows[d.r];
+    return `<div class="delbox" style="margin-bottom:10px;"><span>${row && ambIsSI(row.est) ? 'Esa fila tiene una falla abierta: ciérrala (estado NO) antes de quitarla.' : '¿Quitar «' + escapeHtml(row ? row.det : '') + '» de ' + escapeHtml(h.name) + '? El histórico de incidentes se conserva.'}</span>
+      ${row && ambIsSI(row.est) ? '' : '<button class="btn btn-sm btn-primary" data-act="amb-row-del-ok" type="button">Sí, quitar</button>'}<button class="btn btn-sm btn-ghost" data-act="amb-row-cancel" type="button">Cancelar</button></div>`;
+  }
+  if(!e) return `<div class="flexrow" style="margin-bottom:8px;"><button class="btn btn-sm" data-act="amb-row-new" data-h="${h.id}" type="button">＋ Agregar fila</button></div>`;
+  const inputs = cols.map(i => `<div><label class="field-label">${escapeHtml(h.headers[i] || 'Columna ' + (i+1))}</label><input type="text" data-f="ambRowF" data-i="${i}" value="${escapeHtml(e.c[i])}" /></div>`).join('');
+  return `<div class="panel tight" style="margin-bottom:10px;"><h3 style="margin:0 0 8px;font-size:14px;">${e.r ? 'Editar fila' : 'Nueva fila'} · ${escapeHtml(h.name)}</h3><div class="rowgrid">${inputs}</div>
+    <div class="flexrow" style="margin-top:8px;"><button class="btn btn-sm btn-primary" data-act="amb-row-save" type="button">Guardar fila</button><button class="btn btn-sm btn-ghost" data-act="amb-row-cancel" type="button">Cancelar</button></div></div>`;
+}
+async function ambRowSave(){
+  const e = ambRowEdit; if(!e) return;
+  const h = ambHojas.find(x => x.id===e.h); if(!h) return;
+  const c = e.c.map(x => String(x||'').replace(/\s+/g, ' ').trim().slice(0, 600)); while(c.length < 6) c.push('');
+  const doc = JSON.parse(JSON.stringify(h)); doc.rows = doc.rows || {};
+  let rk = e.r, n;
+  if(rk){ n = doc.rows[rk] ? doc.rows[rk].n : null; if(!n){ toast('La fila ya no existe.'); ambRowEdit = null; render(); return; } }
+  else { n = Math.max(1, ...Object.values(doc.rows).map(x => x.n)) + 1; rk = 'r' + n; }
+  const det = ambDetalle(h.name, n, c);
+  if(!det){ toast('Escribe al menos el nombre o detalle del servicio.'); return; }
+  const prev = doc.rows[rk];
+  doc.rows[rk] = Object.assign({ est:'NO', hist:'', ult:'', aviso:'' }, prev || {}, { n, c, det, desc: c[3] });
+  delete doc.total;
+  if(JSON.stringify(doc).length > 235000){ toast('Esta hoja ya no admite más datos.'); return; }
+  await guarded(() => stSet('amb_hojas', h.id, doc), prev ? 'Fila actualizada' : 'Fila agregada');
+  ambRowEdit = null; render();
+}
+async function ambRowDelete(){
+  const d = ambRowDel; if(!d) return;
+  const h = ambHojas.find(x => x.id===d.h), row = h && h.rows[d.r]; ambRowDel = null;
+  if(!row){ render(); return; }
+  if(ambIsSI(row.est)){ toast('Cierra primero la falla abierta de esa fila.'); render(); return; }
+  const doc = JSON.parse(JSON.stringify(h)); delete doc.rows[d.r]; delete doc.total;
+  await guarded(() => stSet('amb_hojas', h.id, doc), 'Fila quitada');
+  render();
+}
+
 /* ---------- eventos ---------- */
 function ambClick(act, el){
   switch(act){
@@ -4397,6 +4511,13 @@ function ambClick(act, el){
     case 'amb-copy-to': ambCopyText(ambCfg.correos.split(',').map(s => s.trim()).filter(Boolean).join('; '), 'Destinatarios copiados'); break;
     case 'amb-rec-done': ambRecordatorioHecho(el.dataset.k); break;
     case 'amb-sent': ambMarcarEnviado(el.dataset.k, el.dataset.v==='1'); break;
+    case 'amb-retry': ambRetryRec(el.dataset.k); break;
+    case 'amb-row-new': ambRowNew(el.dataset.h); break;
+    case 'amb-row-edit': ambRowStart(el.dataset.h, el.dataset.r); break;
+    case 'amb-row-save': ambRowSave(); break;
+    case 'amb-row-cancel': ambRowEdit = null; ambRowDel = null; render(); break;
+    case 'amb-row-del': ambRowDel = {h:el.dataset.h, r:el.dataset.r}; ambRowEdit = null; render(); break;
+    case 'amb-row-del-ok': ambRowDelete(); break;
     case 'amb-notice-close': ambNotice = null; render(); break;
     case 'amb-cfg-save': ambSaveCfg(); break;
     case 'amb-cfg-reset': ambCfgDraft = JSON.parse(JSON.stringify(ambCfg)); render(); break;
@@ -4408,6 +4529,7 @@ function ambClick(act, el){
 function ambInput(f, el){
   switch(f){
     case 'ambQ': ambFilter.q = el.value; render(); break;
+    case 'ambRowF': if(ambRowEdit) ambRowEdit.c[Number(el.dataset.i)] = el.value; break;
     case 'ambCfg': ambCfgSet(el.dataset.k, el.dataset.num ? Number(el.value) : el.value); break;
   }
 }
@@ -4429,40 +4551,69 @@ function ambBadgeEstado(est){
 function ambMsgBlock(m, extra){
   return `<div class="ambmsg"><div class="small"><b>Asunto:</b> ${escapeHtml(m.subject)}</div><pre class="msgpre">${escapeHtml(m.text)}</pre>${extra||''}</div>`;
 }
+/* Estado del envío de un registro del histórico: Issue de Azure y correo (solo versión web) */
+function ambEnvioBlock(rec, recMsg){
+  if(!rec) return '<div class="small">Este incidente viene del Excel original: no tiene registro de envío automático.</div>';
+  const cierre = !ambIsSI(rec.falla), line = (ok, txt) => `<div class="small" style="margin:2px 0;">${ok===true ? '✅' : ok===false ? '⚠️' : '•'} ${txt}</div>`;
+  let a;
+  if(cierre){
+    a = !rec.issue ? line(null, 'No había un Issue asociado a este incidente.')
+      : rec.issueCerrado || (rec.issueEstado==='ok') ? line(true, 'Issue #' + escapeHtml(rec.issue) + ' cerrado en Azure DevOps.')
+      : rec.issueEstado==='error' ? line(false, 'No se pudo cerrar el Issue #' + escapeHtml(rec.issue) + ': ' + escapeHtml(rec.issueError || 'error de Azure') + '.')
+      : line(null, 'Cierra el Issue #' + escapeHtml(rec.issue) + ' en Azure DevOps (estado: ' + escapeHtml((ambCfg.azure && ambCfg.azure.estadoCierre) || 'Cerrado') + ').');
+  } else {
+    a = rec.issue ? line(true, 'Issue #' + escapeHtml(rec.issue) + (rec.issueEstado==='ok' ? ' creado en Azure DevOps.' : ' anotado.'))
+      : rec.issueEstado==='error' ? line(false, 'No se pudo crear el Issue: ' + escapeHtml(rec.issueError || 'error de Azure') + '.')
+      : rec.issueEstado==='sin_config' ? line(null, 'Azure no está configurado en el servidor: crea el Issue a mano y anota su número.')
+      : line(null, 'Issue pendiente.');
+  }
+  const b = rec.enviado ? line(true, 'Correo ' + (cierre ? 'de cierre ' : 'de incidente ') + 'enviado' + (rec.enviadoEn ? ' · ' + fmtDateTime(rec.enviadoEn) : '') + '.')
+    : rec.correoEstado==='error' ? line(false, 'No se pudo enviar el correo: ' + escapeHtml(rec.correoError || 'error') + '.')
+    : rec.correoEstado==='sin_config' ? line(null, 'El envío de correo no está configurado en el servidor: copia el correo y envíalo a mano.')
+    : line(null, 'Correo pendiente.');
+  const retry = (rec.issueEstado==='error' || rec.correoEstado==='error') && ambNS ? `<button class="btn btn-sm btn-primary" data-act="amb-retry" data-k="${escapeHtml(rec.id)}" type="button" ${ambBusy ? 'disabled' : ''}>Reintentar</button>` : '';
+  return `<div class="ambsec"><div class="ambsec-h">Envío automático</div>${a}${b}${retry ? '<div class="flexrow" style="margin-top:6px;">' + retry + '</div>' : ''}</div>`;
+}
 function ambIncidentCard(i){
   const k = ambIncKey(i), key = 'ambinc:' + k, issue = (i.rec && i.rec.issue) || '';
   const draft = ambIssueDraft(ambMsgData(i), ambCfg);
   const mInc = ambMensaje('inc', ambMsgData(i), ambCfg), mRec = ambMensaje('rec', ambMsgData(i), ambCfg);
-  return `<details class="incbox ${i.vencido ? 'due' : ''}" data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}>
-    <summary><span class="inc-title"><b>${escapeHtml(i.hoja)}</b> · ${escapeHtml(i.detalle.length > 90 ? i.detalle.slice(0, 90) + '…' : i.detalle)}</span>
-      <span class="inc-badges"><span class="badge ans-incumple"><span class="dot"></span>Abierto · ${i.horas >= 48 ? Math.floor(i.horas/24) + ' d' : Math.floor(i.horas) + ' h'}</span>${i.vencido ? `<span class="badge badge-parcial"><span class="dot"></span>⏰ Recordatorio pendiente</span>` : ''}<span class="badge ${issue ? 'badge-recibida' : 'badge-pendiente'}"><span class="dot"></span>${issue ? 'Issue #' + escapeHtml(issue) : 'Sin Issue'}</span></span></summary>
-    <div class="incbody">
-      <div class="small">Detectado ${fmtDateTime(i.inicio)} · responsable: ${escapeHtml(ambAsignado(ambCfg, i.hoja) || '—')} · para cerrarlo, cambia el estado a NO (o intermitente) en la pestaña ${escapeHtml(i.hoja)}.</div>
-      <div class="rowgrid" style="margin-top:10px;"><div><label class="field-label" for="iss-${escapeHtml(k)}">N.º del Issue en Azure DevOps</label>
-        <input type="text" inputmode="numeric" id="iss-${escapeHtml(k)}" data-f="ambIssue" data-k="${escapeHtml(k)}" value="${escapeHtml(issue)}" placeholder="Ej. 70628" style="max-width:200px;" />
-        <div class="small" style="margin-top:4px;">Créalo con los datos de abajo y anota aquí su número: se incluye en el correo y en el cierre.</div></div></div>
-      <div class="ambsec"><div class="ambsec-h">1 · Datos para crear el Issue</div><pre class="msgpre">${escapeHtml(ambIssueText(draft))}</pre>
+  const auto = !!ambNS, autoRec = !!(ambSrv && ambSrv.recordatorios);
+  const manual = `<div class="ambsec"><div class="ambsec-h">${auto ? '' : '1 · '}Datos para crear el Issue</div><pre class="msgpre">${escapeHtml(ambIssueText(draft))}</pre>
         <button class="btn btn-sm" data-act="amb-copy" data-w="issue" data-k="${escapeHtml(k)}" type="button">Copiar datos del Issue</button></div>
-      <div class="ambsec"><div class="ambsec-h">2 · Correo de incidente</div>${ambMsgBlock(mInc)}
+      <div class="ambsec"><div class="ambsec-h">${auto ? '' : '2 · '}Correo de incidente</div>${ambMsgBlock(mInc)}
         <div class="flexrow"><button class="btn btn-sm btn-primary" data-act="amb-copy" data-w="inc" data-k="${escapeHtml(k)}" type="button">Copiar correo</button><button class="btn btn-sm" data-act="amb-copy-asunto" data-w="inc" data-k="${escapeHtml(k)}" type="button">Copiar asunto</button><button class="btn btn-sm" data-act="amb-copy-to" type="button">Copiar destinatarios</button></div></div>
       ${i.vencido ? `<div class="ambsec"><div class="ambsec-h">⏰ Recordatorio (${Math.floor(i.desdeAviso)} h desde el último aviso)</div>${ambMsgBlock(mRec)}
-        <div class="flexrow"><button class="btn btn-sm btn-primary" data-act="amb-copy" data-w="rec" data-k="${escapeHtml(k)}" type="button">Copiar recordatorio</button><button class="btn btn-sm" data-act="amb-copy-asunto" data-w="rec" data-k="${escapeHtml(k)}" type="button">Copiar asunto</button><button class="btn btn-sm" data-act="amb-rec-done" data-k="${escapeHtml(k)}" type="button">Ya lo envié</button></div></div>` : ''}
+        <div class="flexrow"><button class="btn btn-sm btn-primary" data-act="amb-copy" data-w="rec" data-k="${escapeHtml(k)}" type="button">Copiar recordatorio</button><button class="btn btn-sm" data-act="amb-copy-asunto" data-w="rec" data-k="${escapeHtml(k)}" type="button">Copiar asunto</button><button class="btn btn-sm" data-act="amb-rec-done" data-k="${escapeHtml(k)}" type="button">Ya lo envié</button></div></div>` : ''}`;
+  const mkey = 'ambman:' + k;
+  const recInfo = autoRec ? `<div class="small" style="margin:6px 0;">⏰ Recordatorio automático cada ${ambCfg.horasRecordatorio} h mientras siga abierto · último aviso: ${fmtDateTime(i.aviso)}${i.rec && i.rec.nRec ? ' · enviados: ' + i.rec.nRec : ''}.</div>` : '';
+  return `<details class="incbox ${i.vencido ? 'due' : ''}" data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}>
+    <summary><span class="inc-title"><b>${escapeHtml(i.hoja)}</b> · ${escapeHtml(i.detalle.length > 90 ? i.detalle.slice(0, 90) + '…' : i.detalle)}</span>
+      <span class="inc-badges"><span class="badge ans-incumple"><span class="dot"></span>Abierto · ${i.horas >= 48 ? Math.floor(i.horas/24) + ' d' : Math.floor(i.horas) + ' h'}</span>${i.vencido ? `<span class="badge badge-parcial"><span class="dot"></span>⏰ Recordatorio pendiente</span>` : ''}${auto && i.rec && (i.rec.issueEstado==='error' || i.rec.correoEstado==='error') ? `<span class="badge badge-parcial"><span class="dot"></span>⚠ Envío pendiente</span>` : ''}<span class="badge ${issue ? 'badge-recibida' : 'badge-pendiente'}"><span class="dot"></span>${issue ? 'Issue #' + escapeHtml(issue) : 'Sin Issue'}</span></span></summary>
+    <div class="incbody">
+      <div class="small">Detectado ${fmtDateTime(i.inicio)} · responsable: ${escapeHtml(ambAsignado(ambCfg, i.hoja) || '—')} · para cerrarlo, cambia el estado a NO (o intermitente) en la pestaña ${escapeHtml(i.hoja)}.</div>
+      ${auto ? ambEnvioBlock(i.rec) + recInfo : ''}
+      <div class="rowgrid" style="margin-top:10px;"><div><label class="field-label" for="iss-${escapeHtml(k)}">N.º del Issue en Azure DevOps</label>
+        <input type="text" inputmode="numeric" id="iss-${escapeHtml(k)}" data-f="ambIssue" data-k="${escapeHtml(k)}" value="${escapeHtml(issue)}" placeholder="Ej. 70628" style="max-width:200px;" />
+        <div class="small" style="margin-top:4px;">${auto ? 'Se llena solo al crear el Issue; corrígelo aquí si hace falta.' : 'Créalo con los datos de abajo y anota aquí su número: se incluye en el correo y en el cierre.'}</div></div></div>
+      ${auto ? `<details style="margin-top:10px;" data-key="${escapeHtml(mkey)}" ${openDetails.has(mkey) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Hacerlo a mano (copiar datos y correo)</summary>${manual}</details>` : manual}
     </div></details>`;
 }
 function ambIncidentsPanel(incs){
   if(!incs.length) return '';
   const due = incs.filter(i => i.vencido).length;
-  return `<div class="panel"><div class="panel-head"><div><h2>Incidentes abiertos</h2><p class="hint">${incs.length} sin resolver${due ? ' · ' + due + ' con recordatorio pendiente (cada ' + ambCfg.horasRecordatorio + ' h)' : ''}. Abre cada uno para ver el Issue y el correo listos para copiar.</p></div></div>${incs.map(ambIncidentCard).join('')}</div>`;
+  return `<div class="panel"><div class="panel-head"><div><h2>Incidentes abiertos</h2><p class="hint">${incs.length} sin resolver${due ? ' · ' + due + ' con recordatorio pendiente (cada ' + ambCfg.horasRecordatorio + ' h)' : ''}. ${ambNS ? 'Abre cada uno para ver el estado del Issue y del correo.' : 'Abre cada uno para ver el Issue y el correo listos para copiar.'}</p></div></div>${incs.map(ambIncidentCard).join('')}</div>`;
 }
 function ambNoticePanel(){
   if(!ambNotice) return '';
   const r = ambHist.find(x => x.id===ambNotice.id); if(!r){ return ''; }
   const m = ambMensaje('cierre', { hoja:r.hoja, detalle:r.detalle, issue:r.issue, desc:r.desc }, ambCfg);
   return `<div class="panel noticebox"><div class="panel-head"><div><h2>✅ Incidente solucionado</h2><p class="hint">${escapeHtml(r.hoja)} · ${escapeHtml(r.detalle)}. ${r.issue ? 'Cierra el Issue #' + escapeHtml(r.issue) + ' en Azure DevOps (estado: Cerrado) y envía este correo.' : 'No había un Issue anotado para este incidente; envía este correo de cierre.'}</p></div>
-    <button class="btn btn-sm btn-ghost" data-act="amb-notice-close" type="button">Cerrar aviso</button></div>${ambMsgBlock(m)}
+    <button class="btn btn-sm btn-ghost" data-act="amb-notice-close" type="button">Cerrar aviso</button></div>${ambNS ? ambEnvioBlock(r) : ''}${ambMsgBlock(m)}
     <div class="flexrow"><button class="btn btn-sm btn-primary" data-act="amb-copy" data-w="cierre" data-k="${escapeHtml(r.id)}" type="button">Copiar correo de cierre</button><button class="btn btn-sm" data-act="amb-copy-asunto" data-w="cierre" data-k="${escapeHtml(r.id)}" type="button">Copiar asunto</button><button class="btn btn-sm" data-act="amb-copy-to" type="button">Copiar destinatarios</button></div></div>`;
 }
 function ambEmpty(){
+  if(!isAdmin()) return `<div class="panel"><div class="panel-head"><div><h2>Ambientes QA</h2><p class="hint">Todavía no hay ambientes cargados. Pídele al administrador que los cargue.</p></div></div></div>`;
   return `<div class="panel"><div class="panel-head"><div><h2>Ambientes QA</h2><p class="hint">Seguimiento del estado de los ambientes de QA: servicios, banca, app, proveedores y servidores.</p></div></div>
     ${ambProg ? ambProgHtml() : `<div class="empty" style="text-align:left;">
       <p style="margin:0 0 10px;">Carga el Excel de <b>Ambientes QA</b>. Se crea una pestaña por cada hoja (Servicios, Banca, Sitio Público, App, Agil, Proveedores, Banca Empresas y Servidores), más el Histórico de incidentes y el catálogo de fallas generales.</p>
@@ -4490,20 +4641,21 @@ function ambHojaView(h){
   if(q) list = list.filter(x => (x.r.c.join(' ') + ' ' + x.r.est).toLowerCase().indexOf(q) >= 0);
   const cols = [0,1,3,4,5].filter(i => (h.headers[i] && !/^Columna \d+$/i.test(h.headers[i])) || all.some(x => x.r.c[i]));
   const nSI = all.filter(x => ambIsSI(x.r.est)).length, nInter = all.filter(x => /INTERMITENTE|OCASIONALMENTE/i.test(x.r.est)).length;
-  const hrs = ambCfg.horasRecordatorio, now = ambNowIso();
+  const hrs = ambCfg.horasRecordatorio, now = ambNowIso(), canAdm = isAdmin();
   const opts = cur => { const vs = AMB_VALIDOS.slice(); if(cur && vs.indexOf(String(cur).toUpperCase())<0) vs.push(cur); return vs.map(v => `<option value="${escapeHtml(v)}" ${String(v).toUpperCase()===String(cur||'').toUpperCase() ? 'selected' : ''}>${escapeHtml(v)}</option>`).join(''); };
   const solo = (v, label) => `<button class="chipbtn ${ambFilter.solo===v?'active':''}" data-act="amb-solo" data-v="${v}" type="button">${label}</button>`;
   const rowsHtml = list.map(x => {
     const r = x.r, si = ambIsSI(r.est), inter = /INTERMITENTE|OCASIONALMENTE/i.test(r.est), vence = si && ambHorasDesde(r.aviso || r.ult, now) >= hrs;
     return `<tr class="${si ? 'rowsi' : inter ? 'rowint' : ''}">${cols.map(i => `<td><div class="cellx ${i===cols[0] ? 'first' : ''}" title="${escapeHtml(r.c[i])}">${escapeHtml(r.c[i])}</div></td>`).join('')}
-      <td><select class="estsel ${ambBadgeEstado(r.est)}" data-f="ambEst" data-h="${h.id}" data-r="${x.k}" aria-label="Estado de ${escapeHtml(r.det)}">${opts(r.est)}</select></td>
+      <td><select class="estsel ${ambBadgeEstado(r.est)}" data-f="ambEst" data-h="${h.id}" data-r="${x.k}" ${ambBusy ? 'disabled' : ''} aria-label="Estado de ${escapeHtml(r.det)}">${opts(r.est)}</select></td>
       <td class="small" style="white-space:nowrap;">${r.ult ? fmtDateTime(r.ult) : '—'}${vence ? ' <span title="Recordatorio pendiente">⏰</span>' : ''}</td>
-      <td><span class="badge ${r.hist==='SI' ? 'ans-incumple' : r.hist==='NO' ? 'badge-recibida' : 'badge-pendiente'}">${r.hist || '—'}</span></td></tr>`;
+      <td><span class="badge ${r.hist==='SI' ? 'ans-incumple' : r.hist==='NO' ? 'badge-recibida' : 'badge-pendiente'}">${r.hist || '—'}</span></td>${canAdm ? `<td style="white-space:nowrap;"><button class="btn btn-sm btn-ghost" data-act="amb-row-edit" data-h="${h.id}" data-r="${x.k}" type="button" aria-label="Editar fila">✎</button><button class="btn btn-sm btn-ghost" data-act="amb-row-del" data-h="${h.id}" data-r="${x.k}" type="button" aria-label="Quitar fila">🗑</button></td>` : ''}</tr>`;
   }).join('');
   return `<div class="panel"><div class="panel-head"><div><h2>${escapeHtml(h.name)}</h2><p class="hint">${all.length} filas · ${nSI} con falla · ${nInter} intermitentes. Cambia el estado de una fila y la herramienta registra la fecha, el historial y el incidente.</p></div></div>
+    ${canAdm ? ambRowPanel(h, cols) : ''}
     <div class="flexrow" style="margin-bottom:8px;"><input type="search" data-f="ambQ" value="${escapeHtml(ambFilter.q)}" placeholder="Buscar en ${escapeHtml(h.name)}…" aria-label="Buscar" style="max-width:260px;" />${solo('todos','Todas')}${solo('fallas','Con falla (' + nSI + ')')}${solo('inter','Intermitentes (' + nInter + ')')}</div>
-    <div class="tablewrap"><table class="ambtbl"><thead><tr>${cols.map(i => `<th>${escapeHtml(h.headers[i] || 'Columna ' + (i+1))}</th>`).join('')}<th>Estado (Falla?)</th><th>Última actualización</th><th>Historial</th></tr></thead>
-      <tbody>${rowsHtml || `<tr><td colspan="${cols.length + 3}" class="small" style="padding:14px;">No hay filas con este filtro.</td></tr>`}</tbody></table></div></div>`;
+    <div class="tablewrap"><table class="ambtbl"><thead><tr>${cols.map(i => `<th>${escapeHtml(h.headers[i] || 'Columna ' + (i+1))}</th>`).join('')}<th>Estado (Falla?)</th><th>Última actualización</th><th>Historial</th>${canAdm ? '<th></th>' : ''}</tr></thead>
+      <tbody>${rowsHtml || `<tr><td colspan="${cols.length + 3 + (canAdm ? 1 : 0)}" class="small" style="padding:14px;">No hay filas con este filtro.</td></tr>`}</tbody></table></div></div>`;
 }
 function ambHistView(){
   const pairs = ambPair(ambHist).reverse(), st = ambStats(pairs, ambNowIso());
@@ -4514,7 +4666,7 @@ function ambHistView(){
       <td><span class="badge ${ambIsSI(r.falla) ? 'ans-incumple' : 'badge-recibida'}">${escapeHtml(r.falla)}</span></td><td>${r.issue ? '#' + escapeHtml(r.issue) : '—'}</td>
       <td><span class="badge ${r.estado==='Abierto' ? 'ans-incumple' : r.estado==='Solucionado' ? 'badge-recibida' : 'badge-pendiente'}">${escapeHtml(r.estado||'')}</span></td>
       <td class="small">${r.horas!=null ? (r.horas >= 48 ? Math.round(r.horas/24*10)/10 + ' d' : Math.round(r.horas*10)/10 + ' h') : '—'}</td>
-      <td><details data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Ver correo</summary><pre class="msgpre" style="min-width:280px;">${escapeHtml(msgT)}</pre></details></td></tr>`;
+      <td>${ambHistEnvio(r)}<details data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Ver correo</summary><pre class="msgpre" style="min-width:280px;">${escapeHtml(msgT)}</pre></details></td></tr>`;
   }).join('');
   return `<div class="panel"><div class="panel-head"><div><h2>Histórico de incidentes</h2><p class="hint">${st.total} incidentes · ${st.solucionados} solucionados · ${st.abiertos} abiertos${st.promHoras!=null ? ' · tiempo promedio de resolución ' + (st.promHoras >= 48 ? Math.round(st.promHoras/24*10)/10 + ' días' : Math.round(st.promHoras*10)/10 + ' h') : ''}</p></div>
     <button class="btn btn-sm" data-act="amb-export" type="button">⬇ Histórico (Excel)</button></div>
@@ -4533,12 +4685,14 @@ function ambCfgView(){
     return `<div class="rowgrid3"><div class="small" style="align-self:center;"><b>${escapeHtml(n)}</b></div><div>${inp('resp.' + n + '.nombre', r.nombre, 'Nombre del responsable')}</div><div>${inp('resp.' + n + '.correo', r.correo, 'correo@bancofinandina.com')}</div></div>`; }).join('');
   return `<div class="panel"><div class="panel-head"><div><h2>Configuración de Ambientes</h2><p class="hint">Destinatarios, enlaces y responsables que usan los correos y los datos del Issue. Se comparte con todo el equipo.</p></div>
       <div class="flexrow"><button class="btn btn-sm btn-ghost" data-act="amb-cfg-defaults" type="button">Valores originales</button><button class="btn btn-sm" data-act="amb-cfg-reset" type="button">Deshacer cambios</button><button class="btn btn-sm btn-primary" data-act="amb-cfg-save" type="button">Guardar</button></div></div>
+    ${ambSrvStatusHtml()}
     <label class="field-label">Correos de destino (separados por coma)</label><textarea data-f="ambCfg" data-k="correos" rows="3">${escapeHtml(c.correos)}</textarea>
     <div class="rowgrid" style="margin-top:12px;"><div><label class="field-label">Enlace de evidencias / histórico (va en los correos)</label>${inp('evidenciaUrl', c.evidenciaUrl, 'https://…')}</div>
       <div><label class="field-label">Recordatorio cada (horas)</label>${inp('horasRecordatorio', c.horasRecordatorio, '24', true)}</div></div>
     <h3 style="margin:18px 0 6px;font-size:14px;">Issue en Azure DevOps</h3>
     <div class="rowgrid"><div><label class="field-label">Area Path</label>${inp('azure.area', c.azure.area)}</div><div><label class="field-label">Iteration Path</label>${inp('azure.iteracion', c.azure.iteracion)}</div></div>
     <div class="rowgrid" style="margin-top:8px;"><div><label class="field-label">Etiqueta (Tags)</label>${inp('azure.etiqueta', c.azure.etiqueta)}</div><div><label class="field-label">Flujo funcional</label>${inp('azure.flujo', c.azure.flujo)}</div></div>
+    <div class="rowgrid" style="margin-top:8px;"><div><label class="field-label">Estado al cerrar el Issue</label>${inp('azure.estadoCierre', c.azure.estadoCierre || 'Cerrado')}</div><div><label class="field-label">Organización de Azure DevOps</label>${inp('azure.org', c.azure.org)}</div></div>
     <h3 style="margin:18px 0 6px;font-size:14px;">Responsable por hoja</h3>${resp}
     <h3 style="margin:18px 0 6px;font-size:14px;">Datos del Excel</h3>
     <div class="flexrow"><button class="btn btn-sm" data-act="amb-replace" type="button">${ambReplace ? 'Cancelar' : 'Reemplazar con otro Excel'}</button></div>
@@ -5401,7 +5555,9 @@ async function boot(){
   sampleAvailable = !!sampleNS;
   try{ dlNS = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; }catch(e){ dlNS = null; }
   /* Azure DevOps solo existe en la versión web, cuando el servidor tiene la llave configurada */
-  try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use && ROLE()!=='po'){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
+  try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use && ROLE()!=='po' && ROLE()!=='ambientes'){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
+  /* Ambientes: el servidor crea/cierra el Issue y envía el correo (solo en la versión web) */
+  try{ ambNS = (window.__me && window.claude && window.claude.use) ? await window.claude.use('ambientes') : null; ambSrv = ambNS ? (window.__me.ambientes || {}) : null; }catch(e){ ambNS = null; ambSrv = null; }
   await loadRoster();
   currentView = defaultView();
 

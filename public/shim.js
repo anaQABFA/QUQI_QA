@@ -134,6 +134,13 @@
     sync: (id, force) => api('POST', '/api/azure/sync/' + encodeURIComponent(id), { force: !!force })
   };
 
+  /* ---------- Ambientes QA: el servidor crea/cierra el Issue y envía el correo ---------- */
+  const ambientesNS = {
+    estado: () => api('GET', '/api/ambientes/estado'),
+    marcar: (hojaId, rk, valor) => api('POST', '/api/ambientes/marcar', { hojaId, rk, valor }),
+    reintentar: id => api('POST', '/api/ambientes/reintentar', { id })
+  };
+
   /* ---------- usuarios (solo el administrador: para asignar proyectos) ---------- */
   const rosterFn = async () => (await api('GET', '/api/admin/users')).filter(u => u.active).map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role }));
 
@@ -171,6 +178,7 @@
       if(name === 'sample') return me.ai && me.ai.enabled ? sampleNS : null;
       if(name === 'downloads') return dlNS;
       if(name === 'azure') return me.azure && me.azure.enabled ? azureNS : null;
+      if(name === 'ambientes') return ['admin','analista','po','ambientes'].includes(me.user.role) ? ambientesNS : null;
       if(name === 'roster') return me.user.role === 'admin' ? rosterFn : null;
       return null;
     }
