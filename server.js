@@ -159,6 +159,7 @@ app.post('/api/password', wrap(async (req, res) => {
 /* ---------- documentos + tiempo real (SSE) ---------- */
 const clients = new Map();   // respuesta SSE -> contexto del usuario (cada quien recibe solo lo que puede ver)
 function broadcast(ev) {
+  if (ev.col === 'archivos_data') return;   /* el contenido de los archivos no se difunde: se pide al descargar */
   let reassigned = false;
   if (ev.op === 'set' && ev.col === 'projects') {
     const before = JSON.stringify(perm.PA.get(ev.id) || null); perm.setPA(ev.id, ev.data);
@@ -267,8 +268,16 @@ app.get('/api/proyectos-apoyo', staffOnly, wrap(async (req, res) => {
   const rows = await store.listDocs('projects');
   res.json(rows.filter(r => r.data && !metrics.isClosed(r.data)).map(r => ({ id: r.id, name: String(r.data.name || '') })).sort((a, b) => a.name.localeCompare(b.name, 'es')));
 }));
+/* Lectura de un solo documento (se usa para bajar el contenido de un archivo subido). */
+app.get('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
+  const ctx = await ctxOf(req), col = req.params.col, r = await store.getDoc(col, req.params.id);
+  const d = r ? perm.readDoc(ctx, col, r.id, r.data) : null;
+  if (d == null) return res.status(404).json({ error: 'No existe o no tienes acceso.' });
+  res.json({ id: r.id, data: d, version: r.version });
+}));
 app.get('/api/docs/:col', colOk, wrap(async (req, res) => {
   const ctx = await ctxOf(req), col = req.params.col;
+  if (col === 'archivos_data') return res.status(400).json({ error: 'El contenido de los archivos se pide de uno en uno.' });
   const rows = await store.listDocs(col), out = [];
   rows.forEach(r => { const d = perm.readDoc(ctx, col, r.id, r.data); if (d != null) out.push({ id: r.id, data: d, version: r.version }); });
   res.json(out);
@@ -288,6 +297,18 @@ async function syncPname(id, name) {
   const r = await store.getDoc('azure_bugs', id);
   if (r && r.data && r.data.pname !== name) { const m = await store.mergeDoc('azure_bugs', id, { pname: name }, 'sistema'); broadcast({ op: 'set', col: 'azure_bugs', id, data: m.data, version: m.version }); }
 }
+/* Archivos subidos: registro ('archivos') y contenido por trozos ('archivos_data'). Tope de 8 MB por archivo. */
+const MAX_FILE = 8 * 1024 * 1024, MAX_CHUNK = 700000;
+function checkFileDoc(col, b) {
+  if (!perm.isObj(b) || typeof b.projectId !== 'string' || !b.projectId) throw { status: 400, msg: 'Falta el proyecto del archivo.' };
+  if (col === 'archivos') {
+    if (!['figma', 'req'].includes(b.kind)) throw { status: 400, msg: 'Tipo de archivo inválido.' };
+    if (!(Number(b.size) >= 0) || Number(b.size) > MAX_FILE) throw { status: 413, msg: 'El archivo supera el máximo de 8 MB.' };
+    return { projectId: b.projectId, kind: b.kind, name: String(b.name || 'archivo').slice(0, 200), mime: String(b.mime || '').slice(0, 120), size: Number(b.size) || 0, chunks: Math.max(0, Math.min(40, parseInt(b.chunks, 10) || 0)), by: String(b.by || '').slice(0, 120), at: String(b.at || new Date().toISOString()).slice(0, 40) };
+  }
+  if (typeof b.chunk !== 'string' || b.chunk.length > MAX_CHUNK || !/^[A-Za-z0-9+/=]*$/.test(b.chunk)) throw { status: 413, msg: 'Trozo de archivo inválido.' };
+  return { projectId: b.projectId, fid: String(b.fid || '').slice(0, 60), i: parseInt(b.i, 10) || 0, chunk: b.chunk };
+}
 /* Valida y prepara una escritura. Devuelve { data } con el documento a guardar (o { patch } en PATCH). */
 async function prepWrite(req, op, id) {
   const ctx = await ctxOf(req), col = req.params.col, curRow = id ? await store.getDoc(col, id) : null, cur = curRow ? curRow.data : null;
@@ -297,6 +318,7 @@ async function prepWrite(req, op, id) {
     const pr = perm.writeProblem(ctx, col, id, 'delete', cur, null); if (pr) throw { status: 403, msg: pr };
     return { ctx, cur };
   }
+  if (col === 'archivos' || col === 'archivos_data') { body = checkFileDoc(col, body); if (col === 'archivos') body.by = ctx.name; }
   if (col === 'comentarios') body = stampComment(ctx, kind, cur, body);
   let nxt = op === 'patch' ? store.deepMerge(cur || {}, body) : body;
   if (col === 'projects') {
@@ -348,6 +370,8 @@ app.delete('/api/docs/:col/:id', colOk, wrap(async (req, res) => {
     await store.delDoc('azure_bugs', req.params.id); broadcast({ op: 'del', col: 'azure_bugs', id: req.params.id });
     const cm = await db.q("DELETE FROM docs WHERE col='comentarios' AND data->>'projectId'=$1 RETURNING id", [req.params.id]);
     cm.rows.forEach(r => broadcast({ op: 'del', col: 'comentarios', id: r.id }));
+    const ar = await db.q("DELETE FROM docs WHERE col IN ('archivos','archivos_data') AND data->>'projectId'=$1 RETURNING id, col", [req.params.id]);
+    ar.rows.forEach(r => broadcast({ op: 'del', col: r.col, id: r.id }));
   }
   res.json({ ok: true });
 }));

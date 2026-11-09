@@ -73,7 +73,11 @@
           id,
           async set(data){ const r = await api('PUT', '/api/docs/' + col + '/' + encodeURIComponent(id), data); applyDoc(col, id, clone(data), r.version); },
           async update(patch){ const r = await api('PATCH', '/api/docs/' + col + '/' + encodeURIComponent(id), patch); applyDoc(col, id, r.data, r.version); },
-          async delete(){ await api('DELETE', '/api/docs/' + col + '/' + encodeURIComponent(id)); removeDoc(col, id); }
+          async delete(){ await api('DELETE', '/api/docs/' + col + '/' + encodeURIComponent(id)); removeDoc(col, id); },
+          async get(){
+            try{ const r = await api('GET', '/api/docs/' + col + '/' + encodeURIComponent(id)); return { exists:true, id, data: () => clone(r.data) }; }
+            catch(e){ if(e && e.status === 404) return { exists:false, id, data: () => undefined }; throw e; }
+          }
         };
       }
     };

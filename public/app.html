@@ -288,7 +288,7 @@
   .cal button.day.sel{ background:var(--accent-soft); border-color:var(--accent); }
   .daybar{ display:flex; height:5px; width:100%; border-radius:3px; overflow:hidden; background:var(--gridline); gap:1px; }
   .daybar i{ display:block; height:100%; }
-  .c-prueba{ background:var(--good); } .c-bloqueado{ background:var(--critical); } .c-reunion{ background:var(--accent); } .c-gestion{ background:var(--text-muted); }
+  .c-prueba{ background:var(--good); } .c-bloqueado{ background:var(--critical); } .c-reunion{ background:var(--accent); } .c-gestion{ background:var(--text-muted); } .c-cita{ background:#a06cd5; }
   .legend{ display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11.5px; color:var(--text-secondary); margin-top:10px; }
   .legend span{ display:inline-flex; align-items:center; gap:5px; }
   .legend i{ width:10px; height:10px; border-radius:3px; display:inline-block; }
@@ -311,6 +311,7 @@
   table.slots tr.st-bloqueado td:first-child{ box-shadow:inset 3px 0 var(--critical); }
   table.slots tr.st-reunion td:first-child{ box-shadow:inset 3px 0 var(--accent); }
   table.slots tr.st-gestion td:first-child{ box-shadow:inset 3px 0 var(--text-muted); }
+  table.slots tr.st-cita td:first-child{ box-shadow:inset 3px 0 #a06cd5; }
   table.slots tr.st-libre{ opacity:.7; }
   table.slots select{ padding:6px 8px; }
   .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border-radius:999px; background:var(--surface-alt); font-size:12px; margin:0 6px 4px 0; }
@@ -319,7 +320,7 @@
   @media (max-width:720px){ .bugform{ grid-template-columns:1fr 1fr; } }
   .weekgrid td{ padding:3px 4px; font-size:11.5px; }
   .weekgrid .cell{ border-radius:6px; padding:3px 6px; min-height:24px; cursor:pointer; border:1px solid var(--gridline); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px; }
-  .weekgrid .cell.c-prueba{ background:rgba(12,163,12,0.16); } .weekgrid .cell.c-bloqueado{ background:rgba(208,59,59,0.16); } .weekgrid .cell.c-reunion{ background:var(--accent-soft); } .weekgrid .cell.c-gestion{ background:var(--surface-alt); } .weekgrid .cell.c-libre{ background:transparent; color:var(--text-muted); }
+  .weekgrid .cell.c-prueba{ background:rgba(12,163,12,0.16); } .weekgrid .cell.c-bloqueado{ background:rgba(208,59,59,0.16); } .weekgrid .cell.c-reunion{ background:var(--accent-soft); } .weekgrid .cell.c-gestion{ background:var(--surface-alt); } .weekgrid .cell.c-cita{ background:rgba(160,108,213,0.18); } .weekgrid .cell.c-libre{ background:transparent; color:var(--text-muted); }
   .savestate{ font-size:12px; color:var(--text-muted); }
 
   @media (max-width:720px){
@@ -464,7 +465,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js?v=20261104"></script>
+<script src="/shim.js?v=20261109"></script>
 <script>
 (function(){
 'use strict';
@@ -1204,16 +1205,30 @@ function slotLabel(h){
   const a = h, b = h+1;
   return suf(a)===suf(b) ? (f(a) + ' – ' + f(b) + ' ' + suf(b)) : (f(a) + ' ' + suf(a) + ' – ' + f(b) + ' ' + suf(b));
 }
-const SLOTS = []; for(let h=7; h<=17; h++) SLOTS.push({k:pad2(h), label:slotLabel(h)});
+/* Jornada: 7 am – 12:30 pm y 2 – 6 pm (12:30 a 2:00 pm es el almuerzo y no se registra). El bloque de las 11 dura 1,5 h.
+   w = horas que vale cada bloque. Los bloques 12 y 13 ya no existen: solo se muestran en días antiguos que tenían horas registradas ahí. */
+const SLOTS = [7,8,9,10,11,14,15,16,17].map(h => ({k:pad2(h), label: h===11 ? '11 am – 12:30 pm' : slotLabel(h), w: h===11 ? 1.5 : 1}));
+const LEGACY_SLOTS = [{k:'12', label:'12 – 1 pm (anterior)', w:1}, {k:'13', label:'1 – 2 pm (anterior)', w:1}];
+function slotsOf(day){
+  const out = SLOTS.slice();
+  LEGACY_SLOTS.forEach(l => { const x = day && day.slots && day.slots[l.k]; if(x && x.e && x.e!=='libre') out.push(l); });
+  return out.sort((a,b) => a.k < b.k ? -1 : 1);
+}
+function slotsForDays(days){
+  const m = new Map(); SLOTS.forEach(s => m.set(s.k, s));
+  (days||[]).forEach(d => slotsOf(d).forEach(s => m.set(s.k, s)));
+  return Array.from(m.values()).sort((a,b) => a.k < b.k ? -1 : 1);
+}
 const ESTADOS = [
   {k:'prueba', label:'Pudo probar', cls:'c-prueba'},
   {k:'bloqueado', label:'Bloqueado', cls:'c-bloqueado'},
   {k:'reunion', label:'Reunión / entrega', cls:'c-reunion'},
   {k:'gestion', label:'Gestión / seguimiento', cls:'c-gestion'},
+  {k:'cita', label:'Cita médica', cls:'c-cita'},
   {k:'libre', label:'Sin registrar', cls:'c-libre'}
 ];
 const MOTIVOS = ['Ambiente','Datos de prueba','Accesos / permisos','Build / despliegue','Requerimiento','Otro'];
-function emptySlot(k){ return { e:'libre', d: k==='12' ? 'Almuerzo' : '', m:'', bugs:[] }; }
+function emptySlot(k){ return { e:'libre', d:'', m:'', bugs:[] }; }
 function emptyDay(analystId, fecha){
   const slots = {}; SLOTS.forEach(s => { slots[s.k] = emptySlot(s.k); });
   return { analystId, fecha, slots, extras:false, extrasNota:'', apoyo:[], updatedAt:null, updatedBy:null };
@@ -1228,26 +1243,26 @@ function normDay(d){
   return day;
 }
 function daySummary(day){
-  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, libre:0, bugMin:0, bugs:0, registrado:0};
+  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, cita:0, libre:0, bugMin:0, bugs:0, registrado:0};
   if(!day) return r;
-  SLOTS.forEach(s => {
+  slotsOf(day).forEach(s => {
     const x = day.slots[s.k]; if(!x) return;
-    r[x.e] = (r[x.e]||0) + 1;
+    r[x.e] = (r[x.e]||0) + s.w;
     (x.bugs||[]).forEach(b => { r.bugMin += Number(b.min)||0; r.bugs++; });
   });
-  r.registrado = r.prueba + r.bloqueado + r.reunion + r.gestion;
+  r.registrado = r.prueba + r.bloqueado + r.reunion + r.gestion + r.cita;
   return r;
 }
 function monthAgg(analistas, bitMap, ym){
   return analistas.map(a => {
-    const r = {analista:a, prueba:0, bloqueado:0, reunion:0, gestion:0, bugMin:0, bugs:0, dias:0, extras:0, motivos:{}};
+    const r = {analista:a, prueba:0, bloqueado:0, reunion:0, gestion:0, cita:0, bugMin:0, bugs:0, dias:0, extras:0, motivos:{}};
     bitMap.forEach(d => {
       if(d.analystId!==a.id || String(d.fecha).slice(0,7)!==ym) return;
       const s = daySummary(d);
       if(s.registrado>0) r.dias++;
-      r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion;
+      r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion; r.cita += s.cita;
       r.bugMin += s.bugMin; r.bugs += s.bugs; if(d.extras) r.extras++;
-      SLOTS.forEach(sl => { const x = d.slots[sl.k]; if(x && x.e==='bloqueado'){ const m = x.m || 'Sin motivo'; r.motivos[m] = (r.motivos[m]||0) + 1; } });
+      slotsOf(d).forEach(sl => { const x = d.slots[sl.k]; if(x && x.e==='bloqueado'){ const m = x.m || 'Sin motivo'; r.motivos[m] = (r.motivos[m]||0) + sl.w; } });
     });
     return r;
   });
@@ -1642,7 +1657,7 @@ let pruForm = null, azFilt = {}, tpForm = null;
 let azNS = null, azInfo = null, azBugs = new Map(), azForm = null, azBusy = new Set(), azMsg = {};
 
 let dbNS = null, sampleNS = null, dbAvailable = false, sampleAvailable = false;
-const local = { projects:new Map(), analistas:new Map(), bitacora:new Map(), config:new Map(), seguimiento:new Map(), amb_hojas:new Map(), amb_hist:new Map(), comentarios:new Map() };
+const local = { projects:new Map(), analistas:new Map(), bitacora:new Map(), config:new Map(), seguimiento:new Map(), amb_hojas:new Map(), amb_hist:new Map(), comentarios:new Map(), archivos:new Map(), archivos_data:new Map() };
 let pendingRender = false;
 function newSegForm(tipo, fecha){ return { tipo:tipo||'stopper', fecha:fecha||ymd(new Date()), hu:'', crit:'', bugId:'', texto:'', nuevoTexto:'', codigo:'', desc:'', peso:'', criterios:'', pendiente:true, prio:'', prioNombre:'', ambiente:'', hIni:'', hFin:'', issue:'', casosDis:'', casosOk:'', aspectos:CQ_ASPECTOS, planId:'', suiteId:'', planUrl:'', appAmb:'', bancaUrl:'', iterApp:'', iterBanca:'', bDef:'', bMej:'', bPro:'', bAmb:'', bUx:'', bFun:'', resultado:'' }; }
 let seg = newSegForm();
@@ -1693,6 +1708,8 @@ function ingest(col, list){
     ambHist = list;
   } else if(col==='comentarios'){
     comentarios = list.map(d => JSON.parse(JSON.stringify(d)));
+  } else if(col==='archivos'){
+    archivos = list.map(d => JSON.parse(JSON.stringify(d)));
   } else if(col==='azure_bugs'){
     azBugs = new Map(list.map(d => [d.id, JSON.parse(JSON.stringify(d))]));
   }
@@ -2464,7 +2481,7 @@ function viewProjectDetail(){
   body += qaClockPanel(p);
   body += pruebasPanel(p);
   body += azurePanel(p);
-  body += figmaPanel(p);
+  body += reqPanel(p) + figmaPanel(p);
   body += `<div class="panel"><div class="panel-head"><div><h2>Historias de usuario</h2>
     <p class="hint">${editing ? 'Ajusta el peso de cada HU y el de cada criterio dentro de su HU. Cada nivel debe sumar 100%.' : 'Abre “Criterios de aceptación” en cada HU y marca los criterios a medida que llegan a QA; el % del proyecto sube según su peso.'}</p></div>
     <div class="flexrow">${editing
@@ -2645,13 +2662,15 @@ function figItemHtml(e, n, ctx){
   const icon = e.tipo==='archivo' ? '📎' : '🔗';
   const safe = e.tipo==='url' && /^https?:\/\//i.test(e.url||'') ? e.url : '';
   const link = safe ? ` <a class="az-link" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">Abrir en Figma ↗</a>` : '';
-  const meta = e.tipo==='archivo' ? `${escapeHtml(e.nombre||'')} · ${figSize(e.tamano)} · <em>el archivo no se guarda en la app</em>` : escapeHtml(e.url||'');
+  const stored = e.tipo==='archivo' && e.archivoId && (ctx!=='proj' || storedMeta(e.archivoId));
+  const meta = e.tipo==='archivo' ? `${escapeHtml(e.nombre||'')} · ${figSize(e.tamano)}${ctx==='draft' ? ' · <em>se guarda al crear el proyecto</em>' : (stored ? '' : ' · <em>archivo anterior: no quedó guardado, vuelve a subirlo para poder descargarlo</em>')}` : escapeHtml(e.url||'');
   const editing = ctx==='proj' && figEdit && figEdit.id===e.id;
   const com = editing
     ? `<textarea rows="3" data-f="figEdit" style="margin-top:8px;width:100%;" placeholder="¿Qué cambió frente al original?">${escapeHtml(figEdit.comentario)}</textarea><div class="flexend" style="margin-top:6px;"><button class="btn btn-sm btn-ghost" data-act="fig-edit-cancel" type="button">Cancelar</button><button class="btn btn-sm btn-primary" data-act="fig-edit-save" type="button">Guardar comentario</button></div>`
     : (e.comentario ? `<div class="figcom">${escapeHtml(e.comentario)}</div>` : (e.original ? '' : '<div class="figmeta">Sin comentario de cambios.</div>'));
+  const dl = (ctx==='proj' && stored) ? fileDlBtn(e.archivoId) : '';
   const acts = ctx==='proj'
-    ? (figDel===e.id
+    ? dl + (figDel===e.id
         ? `<span class="small" style="color:var(--critical)">¿Quitar esta carga del historial?</span><button class="btn btn-sm btn-danger" data-act="fig-del-ok" data-id="${escapeHtml(e.id)}" type="button">Sí, quitar</button><button class="btn btn-sm btn-ghost" data-act="fig-del-cancel" type="button">No</button>`
         : `${editing ? '' : `<button class="btn btn-sm btn-ghost" data-act="fig-edit" data-id="${escapeHtml(e.id)}" type="button">Comentar / editar</button>`}<button class="btn btn-sm btn-ghost" data-act="fig-del" data-id="${escapeHtml(e.id)}" type="button">Quitar</button>`)
     : `<button class="btn btn-sm btn-ghost" data-act="fig-del-draft" data-id="${escapeHtml(e.id)}" type="button">Quitar</button>`;
@@ -3110,8 +3129,8 @@ function bugTitleFor(id){
 function tilesHtml(day){
   const s = daySummary(day);
   const t = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
-  return t('Probando', s.prueba + ' h') + t('Bloqueado', s.bloqueado + ' h') + t('Reunión', s.reunion + ' h') + t('Gestión', s.gestion + ' h')
-    + t('Bugs reportados', s.bugs, s.bugMin + ' min') + t('Jornada', s.registrado + ' / 8 h', s.registrado>8 ? 'horas extra' : '');
+  return t('Probando', h1(s.prueba)) + t('Bloqueado', h1(s.bloqueado)) + t('Reunión', h1(s.reunion)) + t('Gestión', h1(s.gestion)) + (s.cita ? t('Cita médica', h1(s.cita)) : '')
+    + t('Bugs reportados', s.bugs, s.bugMin + ' min') + t('Jornada', h1(s.registrado).replace(' h','') + ' / 8 h', s.registrado>8 ? 'horas extra' : '');
 }
 function cap(s){ s = String(s||''); return s.charAt(0).toUpperCase() + s.slice(1); }
 function monthNavLabel(ym){ const [y,m] = ym.split('-').map(Number); return cap(new Date(y, m-1, 1).toLocaleDateString('es-CO', {month:'long', year:'numeric'})); }
@@ -3124,7 +3143,7 @@ function calendarHtml(a){
   for(let d=1; d<=days; d++){
     const date = y + '-' + pad2(m) + '-' + pad2(d), dow = new Date(y, m-1, d).getDay();
     const s = daySummary(getDay(a.id, date));
-    const bar = ['prueba','bloqueado','reunion','gestion'].filter(k => s[k]>0).map(k => `<i class="c-${k}" style="flex:${s[k]}"></i>`).join('');
+    const bar = ['prueba','bloqueado','reunion','gestion','cita'].filter(k => s[k]>0).map(k => `<i class="c-${k}" style="flex:${s[k]}"></i>`).join('');
     cells += `<button type="button" class="day ${date===bit.date?'sel':''} ${date===today?'today':''} ${(dow===0||dow===6)?'we':''}" data-act="bit-day" data-date="${date}" aria-label="${fmtYmd(date)}"><span>${d}</span><span class="daybar">${bar}</span></button>`;
   }
   return `<div class="monthnav"><button class="btn btn-sm" data-act="bit-month" data-d="-1" type="button" aria-label="Mes anterior">‹</button><strong>${monthNavLabel(bit.month)}</strong><button class="btn btn-sm" data-act="bit-month" data-d="1" type="button" aria-label="Mes siguiente">›</button></div>
@@ -3132,7 +3151,7 @@ function calendarHtml(a){
     <div class="legend">${ESTADOS.filter(e=>e.k!=='libre').map(e => `<span><i class="${e.cls}"></i>${e.label}</span>`).join('')}</div>`;
 }
 function slotRows(day){
-  return SLOTS.map(sl => {
+  return slotsOf(day).map(sl => {
     const x = day.slots[sl.k];
     const chips = (x.bugs||[]).map((b,bi) => `<span class="chip" title="${escapeHtml(bugTitleFor(b.id) || b.n || '')}"><span class="mono">#${escapeHtml(b.id)}</span> · ${Number(b.min)||0} min${b.n ? ' · ' + escapeHtml(b.n) : ''}<button type="button" data-act="bit-bug-del" data-s="${sl.k}" data-bi="${bi}" aria-label="Quitar bug">×</button></span>`).join('');
     const form = bit.bugForm===sl.k
@@ -3162,14 +3181,14 @@ function weekViewHtml(a){
   const dates = [0,1,2,3,4].map(i => ymd(addDays(start, i)));
   const days = dates.map(d => getDay(a.id, d));
   const head = dates.map(d => `<th>${escapeHtml(fmtYmd(d, {weekday:'short', day:'numeric', month:'short'}))}</th>`).join('');
-  const rows = SLOTS.map(sl => `<tr><td class="mono" style="white-space:nowrap;">${sl.label}</td>${days.map((day,i) => {
+  const rows = slotsForDays(days).map(sl => `<tr><td class="mono" style="white-space:nowrap;">${sl.label}</td>${days.map((day,i) => {
       const x = day && day.slots[sl.k];
       const e = x ? x.e : 'libre';
       const txt = x ? (x.d || (e==='libre' ? '' : ESTADOS.find(o => o.k===e).label)) : '';
       const bugs = x && x.bugs && x.bugs.length ? ' 🐞' + x.bugs.length : '';
       return `<td><div class="cell c-${e}" data-act="bit-open" data-date="${dates[i]}" role="button" tabindex="0" title="${escapeHtml(txt)}">${escapeHtml(txt)}${bugs}</div></td>`;
     }).join('')}</tr>`).join('');
-  const totals = `<tr><td><strong>Totales</strong></td>${days.map(day => { const s = daySummary(day); return `<td class="small">${s.prueba} h prueba<br>${s.bloqueado} h bloq.${day && day.extras ? '<br>+ extras' : ''}</td>`; }).join('')}</tr>`;
+  const totals = `<tr><td><strong>Totales</strong></td>${days.map(day => { const s = daySummary(day); return `<td class="small">${h1(s.prueba)} prueba<br>${h1(s.bloqueado)} bloq.${s.cita ? '<br>' + h1(s.cita) + ' cita méd.' : ''}${day && day.extras ? '<br>+ extras' : ''}</td>`; }).join('')}</tr>`;
   return `<div class="panel-head"><div><h2>Semana del ${escapeHtml(fmtYmd(dates[0], {day:'numeric', month:'long'}))}</h2><p class="hint">Bitácora de ${escapeHtml(a.name)} · haz clic en una celda para abrir ese día</p></div>
       <div class="flexrow"><button class="btn btn-sm" data-act="bit-shift" data-d="-7" type="button" aria-label="Semana anterior">‹</button><button class="btn btn-sm" data-act="bit-today" type="button">Hoy</button><button class="btn btn-sm" data-act="bit-shift" data-d="7" type="button" aria-label="Semana siguiente">›</button></div></div>
     <div class="tablewrap"><table class="weekgrid"><thead><tr><th>Hora</th>${head}</tr></thead><tbody>${rows}${totals}</tbody></table></div>`;
@@ -3201,22 +3220,27 @@ function frozenOn(p, d){
   const fi = freezeInfo(segs.filter(e => e.projectId===p.id), d);
   return fi.intervals.some(i => d >= i.desde && d < i.hasta) || !!(fi.current && d >= fi.current.desde);
 }
-/* ¿Ese día el proyecto estaba en pruebas? Recibido en QA, ya iniciadas las pruebas, sin cerrar y sin estar congelado. */
-function activeOnDay(p, d){
+/* ¿Ese día el proyecto estaba en la etapa de pruebas? Recibido en QA, ya iniciadas las pruebas y sin cerrar (congelado o no). */
+function inTestingWindow(p, d){
   if(!isReceived(p)) return false;
   const start = [toYmdLocal(p.testStart), p.recibidoEn].filter(Boolean).sort().pop() || '';
   if(!start || d < start) return false;
   const end = isClosed(p) ? toYmdLocal(closedAt(p)) : '';
   if(end && d > end) return false;
-  return !frozenOn(p, d);
+  return true;
 }
+/* ¿Ese día el proyecto estaba en pruebas y trabajándose? (no cuenta si estaba congelado por la prioridad de otro) */
+function activeOnDay(p, d){ return inTestingWindow(p, d) && !frozenOn(p, d); }
+/* Proyectos del analista que ese día seguían abiertos en pruebas pero congelados: siguen visibles, solo que no exigen la meta. */
+function frozenProjectsOn(a, d){ return analystProjects(a).filter(p => inTestingWindow(p, d) && frozenOn(p, d)); }
 /* Estado de la meta de un día: cumple / incumple / en_curso (hoy, aún sin llegar) / sin_azure / sin_proyecto / libre / futuro */
 function metaOf(a, date){
   const today = ymd(new Date()), c = casosOf(a, date), r = {date, c, k:'', act:[], noAz:[]};
   if(date > today){ r.k = 'futuro'; return r; }
   if(!isBizDay(date)){ r.k = 'libre'; return r; }
   analystProjects(a).forEach(p => { if(activeOnDay(p, date)) (p.azureTest ? r.act : r.noAz).push(p); });
-  if(!r.act.length) r.k = r.noAz.length ? 'sin_azure' : 'sin_proyecto';
+  r.fz = frozenProjectsOn(a, date);
+  if(!r.act.length) r.k = r.noAz.length ? 'sin_azure' : (r.fz.length ? 'congelado' : 'sin_proyecto');
   else if(c.tot >= CASOS_META) r.k = 'cumple';
   else r.k = date===today ? 'en_curso' : 'incumple';
   return r;
@@ -3228,6 +3252,7 @@ function metaBadge(m, short){
     case 'incumple': return `<span class="badge ans-incumple"><span class="dot"></span>${short ? '✗ ' + m.c.tot : '✗ Bajo la meta · ' + m.c.tot + ' de ' + CASOS_META}</span>`;
     case 'en_curso': return `<span class="badge badge-parcial"><span class="dot"></span>${short ? m.c.tot + ' · faltan ' + falta : 'En curso · ' + m.c.tot + ' de ' + CASOS_META + ' (faltan ' + falta + ')'}</span>`;
     case 'sin_azure': return `<span class="badge badge-pendiente" title="El proyecto en pruebas no tiene un plan de Azure Test Plans vinculado"><span class="dot"></span>${short ? 'Sin plan Azure' : 'Sin plan de Azure vinculado'}</span>`;
+    case 'congelado': return `<span class="badge badge-pendiente" title="${esc2(m.fz.map(p => p.name).join(', '))} está congelado por la prioridad de otro proyecto: no se exige la meta"><span class="dot"></span>${short ? '❄ Congelado' : '❄ Proyecto congelado · no se exige la meta'}</span>`;
     case 'sin_proyecto': return `<span class="badge badge-pendiente"><span class="dot"></span>${short ? '—' : 'Sin proyecto en pruebas'}</span>`;
     case 'libre': return `<span class="badge badge-pendiente"><span class="dot"></span>${short ? '—' : 'Día no hábil'}</span>`;
     default: return '<span class="small">—</span>';
@@ -3248,18 +3273,18 @@ function periodLabel(view){
 }
 const VIEW_NAME = {dia:'del día', semana:'de la semana', mes:'del mes'};
 function periodStats(a, dates){
-  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, bugs:0, bugMin:0, dias:0, extras:0, motivos:{}, casos:0, ok:0, fail:0, block:0, exig:0, cumple:0, creados:0, apoyoH:0, apoyoCasos:0, apoyoCreados:0, days:[]};
+  const r = {prueba:0, bloqueado:0, reunion:0, gestion:0, cita:0, bugs:0, bugMin:0, dias:0, extras:0, motivos:{}, casos:0, ok:0, fail:0, block:0, exig:0, cumple:0, creados:0, apoyoH:0, apoyoCasos:0, apoyoCreados:0, days:[]};
   dates.forEach(d => {
     const day = getDay(a.id, d), s = daySummary(day), m = metaOf(a, d);
     if(s.registrado > 0) r.dias++;
-    r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion; r.bugs += s.bugs; r.bugMin += s.bugMin;
-    if(day){ if(day.extras) r.extras++; SLOTS.forEach(sl => { const x = day.slots[sl.k]; if(x && x.e==='bloqueado'){ const mo = x.m || 'Sin motivo'; r.motivos[mo] = (r.motivos[mo]||0) + 1; } }); }
+    r.prueba += s.prueba; r.bloqueado += s.bloqueado; r.reunion += s.reunion; r.gestion += s.gestion; r.cita += s.cita; r.bugs += s.bugs; r.bugMin += s.bugMin;
+    if(day){ if(day.extras) r.extras++; slotsOf(day).forEach(sl => { const x = day.slots[sl.k]; if(x && x.e==='bloqueado'){ const mo = x.m || 'Sin motivo'; r.motivos[mo] = (r.motivos[mo]||0) + sl.w; } }); }
     r.casos += m.c.tot; r.ok += m.c.ok; r.fail += m.c.fail; r.block += m.c.block;
     const cr = creadosOf(a, d); r.creados += cr.tot; r.apoyoCreados += cr.apoyo; r.apoyoCasos += m.c.apoyo; r.apoyoH += apoyoHoras(a, d);
     if(m.k==='cumple' || m.k==='incumple'){ r.exig++; if(m.k==='cumple') r.cumple++; }
     r.days.push({d, s, m, cr: cr.tot, ah: apoyoHoras(a, d)});
   });
-  r.reg = r.prueba + r.bloqueado + r.reunion + r.gestion;
+  r.reg = r.prueba + r.bloqueado + r.reunion + r.gestion + r.cita;
   r.topMotivo = Object.entries(r.motivos).sort((x,y) => y[1]-x[1])[0];
   return r;
 }
@@ -3274,7 +3299,8 @@ function narrativa(st, view, opt){
   if(st.reg){
     let t = (view==='dia' ? 'Registró ' : 'Registró ') + h1(st.reg) + ': ' + h1(st.prueba) + ' probando';
     if(st.bloqueado) t += ', ' + h1(st.bloqueado) + ' bloqueado' + (st.topMotivo ? ' (sobre todo por «' + st.topMotivo[0].toLowerCase() + '»)' : '');
-    if(st.reunion + st.gestion) t += ' y ' + h1(st.reunion + st.gestion) + ' en reunión y gestión';
+    if(st.reunion + st.gestion) t += (st.cita ? ', ' : ' y ') + h1(st.reunion + st.gestion) + ' en reunión y gestión';
+    if(st.cita) t += ' y ' + h1(st.cita) + ' en cita médica';
     partes.push(t + '.');
     if(st.prueba + st.bloqueado > 0 && st.bloqueado > 0) partes.push('El bloqueo fue el ' + fmtPct(st.bloqueado / (st.prueba + st.bloqueado) * 100) + ' del tiempo de pruebas.');
   }
@@ -3301,10 +3327,10 @@ function bitSegHtml(act, cur){
 }
 function bitTeamHtml(){
   const view = bit.tview, dates = periodDates(view);
-  const rows = analistas.map(a => ({a, st: periodStats(a, dates), pr: analystProjects(a).filter(p => activeOnDay(p, ymd(new Date())))}));
-  const tot = rows.reduce((t, r) => { ['prueba','bloqueado','reunion','gestion','bugs','bugMin','casos','ok','fail','block','exig','cumple','extras','creados','apoyoH','apoyoCasos','apoyoCreados'].forEach(k => { t[k] = (t[k]||0) + r.st[k]; }); t.conReg += r.st.reg ? 1 : 0; return t; }, {conReg:0});
+  const rows = analistas.map(a => ({a, st: periodStats(a, dates), pr: analystProjects(a).filter(p => activeOnDay(p, ymd(new Date()))), fz: frozenProjectsOn(a, ymd(new Date()))}));
+  const tot = rows.reduce((t, r) => { ['prueba','bloqueado','reunion','gestion','cita','bugs','bugMin','casos','ok','fail','block','exig','cumple','extras','creados','apoyoH','apoyoCasos','apoyoCreados'].forEach(k => { t[k] = (t[k]||0) + r.st[k]; }); t.conReg += r.st.reg ? 1 : 0; return t; }, {conReg:0});
   const tn = rows.reduce((o, r) => { Object.entries(r.st.motivos).forEach(([k,v]) => { o[k] = (o[k]||0) + v; }); return o; }, {});
-  const teamSt = Object.assign({}, tot, {reg: (tot.prueba||0) + (tot.bloqueado||0) + (tot.reunion||0) + (tot.gestion||0), motivos: tn, topMotivo: Object.entries(tn).sort((x,y) => y[1]-x[1])[0]});
+  const teamSt = Object.assign({}, tot, {reg: (tot.prueba||0) + (tot.bloqueado||0) + (tot.reunion||0) + (tot.gestion||0) + (tot.cita||0), motivos: tn, topMotivo: Object.entries(tn).sort((x,y) => y[1]-x[1])[0]});
   const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
   const metaTxt = r => view==='dia'
     ? metaBadge(metaOf(r.a, bit.date), true)
@@ -3312,7 +3338,8 @@ function bitTeamHtml(){
   const body = rows.map(r => {
     const s = r.st, tp = s.prueba + s.bloqueado;
     const motivo = Object.entries(s.motivos).sort((x,y) => y[1]-x[1]).slice(0,2).map(([k,v]) => k + ' (' + v + ' h)').join(', ');
-    const pnames = r.pr.length ? r.pr.map(p => `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(p.id)}">${esc2(p.name)}</button>`).join(', ') : '<span class="small">—</span>';
+    const pbtn = (p, fz) => `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(p.id)}">${fz ? '❄ ' : ''}${esc2(p.name)}</button>` + (fz ? ' <span class="small">(congelado)</span>' : '');
+    const pnames = (r.pr.length || r.fz.length) ? r.pr.map(p => pbtn(p, false)).concat(r.fz.map(p => pbtn(p, true))).join(', ') : '<span class="small">—</span>';
     return `<tr><td data-label="Analista"><button type="button" class="namebtn" data-act="bit-open-analyst" data-id="${esc2(r.a.id)}">${esc2(r.a.name)}</button>${window.__me && !r.a.userId ? '<div class="small">sin usuario vinculado</div>' : ''}</td>
       <td data-label="En pruebas hoy">${pnames}${r.a.userId ? '<div style="margin-top:4px;">' + loadBadge(r.a) + '</div>' : ''}</td>
       <td class="num" data-label="Casos ejecutados">${r.a.userId ? s.casos : '—'}</td><td class="num" data-label="Meta ${CASOS_META}/día">${r.a.userId ? metaTxt(r) : '<span class="small">—</span>'}</td>
@@ -3338,6 +3365,7 @@ function bitTeamHtml(){
 function casosDayHtml(a){
   const m = metaOf(a, bit.date), c = m.c;
   const msg = !a.userId ? 'Esta ficha no está vinculada a un usuario: los casos de Azure se cuentan por usuario.'
+    : m.k==='congelado' ? 'Su proyecto está congelado por la prioridad de otro proyecto: sigue visible en su bandeja, pero no se exige la meta de casos.'
     : m.k==='sin_azure' ? 'Tiene proyecto en pruebas pero sin plan de Azure Test Plans vinculado: vincúlalo en el proyecto para medir los casos.'
     : (!c.tot ? (m.k==='libre' ? 'Día no hábil.' : m.k==='futuro' ? '' : 'No se registraron casos ejecutados en Azure este día.') : '');
   const rows = c.rows.map(r => `<tr><td data-label="Proyecto">${r.p ? `<button type="button" class="namebtn" data-act="open-project" data-id="${esc2(r.pid)}">${esc2(r.name)}</button>` : esc2(r.name)}${r.ayuda ? ' <span class="badge badge-parcial"><span class="dot"></span>Apoyo</span>' : ''}</td><td class="num" data-label="Exitosos">${r.ok}</td><td class="num" data-label="Fallidos">${r.fail}</td><td class="num" data-label="Bloqueados">${r.block}</td><td class="num" data-label="Total"><strong>${r.tot}</strong></td></tr>`).join('');
@@ -3358,7 +3386,7 @@ function analystSummaryHtml(a, view){
   const tile = (l, v, sub) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div>${sub ? `<div class="small">${sub}</div>` : ''}</div>`;
   const metaTile = view==='dia' ? tile('Meta ' + CASOS_META, m.k==='cumple' ? '✓' : m.k==='incumple' ? '✗' : '—', m.k==='cumple' ? 'cumplida' : m.k==='incumple' ? 'bajo la meta' : m.k==='en_curso' ? 'faltan ' + Math.max(0, CASOS_META - m.c.tot) : '') : tile('Meta ' + CASOS_META, st.exig ? fmtPct(st.cumple / st.exig * 100) : '—', st.exig ? st.cumple + ' de ' + st.exig + ' días' : 'sin días exigibles');
   return {st, html: `<div class="panel"><div class="panel-head"><div><h2>Resumen ${VIEW_NAME[view]} — ${esc2(periodLabel(view))}</h2><p class="hint">Cómo le fue a ${esc2(a.name)}</p></div>${bitNavHtml(view)}</div>
-    <div class="daytiles">${tile('Probando', h1(st.prueba))}${tile('Bloqueado', h1(st.bloqueado))}${tile('Reunión / gestión', h1(st.reunion + st.gestion))}${tile('Bugs reportados', st.bugs, st.bugMin + ' min')}${tile('Casos ejecutados', a.userId ? st.casos : '—', st.casos ? st.ok + ' ✓ · ' + st.fail + ' ✗ · ' + st.block + ' ⛔' + (st.apoyoCasos ? ' · ' + st.apoyoCasos + ' de apoyo' : '') : '')}${tile('Casos creados', a.userId ? st.creados : '—', st.apoyoCreados ? st.apoyoCreados + ' de apoyo' : 'cargados en Azure')}${tile('Apoyo a otros', h1(st.apoyoH), st.apoyoCasos ? st.apoyoCasos + ' casos ejecutados' : 'horas registradas')}${metaTile}${tile('Días con registro', st.dias, st.extras ? st.extras + ' con horas extra' : '')}</div>
+    <div class="daytiles">${tile('Probando', h1(st.prueba))}${tile('Bloqueado', h1(st.bloqueado))}${tile('Reunión / gestión', h1(st.reunion + st.gestion))}${st.cita ? tile('Cita médica', h1(st.cita)) : ''}${tile('Bugs reportados', st.bugs, st.bugMin + ' min')}${tile('Casos ejecutados', a.userId ? st.casos : '—', st.casos ? st.ok + ' ✓ · ' + st.fail + ' ✗ · ' + st.block + ' ⛔' + (st.apoyoCasos ? ' · ' + st.apoyoCasos + ' de apoyo' : '') : '')}${tile('Casos creados', a.userId ? st.creados : '—', st.apoyoCreados ? st.apoyoCreados + ' de apoyo' : 'cargados en Azure')}${tile('Apoyo a otros', h1(st.apoyoH), st.apoyoCasos ? st.apoyoCasos + ' casos ejecutados' : 'horas registradas')}${metaTile}${tile('Días con registro', st.dias, st.extras ? st.extras + ' con horas extra' : '')}</div>
     <div class="banner banner-info"><span>📝</span><span>${esc2(narrativa(st, view, {meta:m}))}</span></div></div>`};
 }
 function analystProjectsHtml(a){
@@ -3375,7 +3403,7 @@ function analystProjectsHtml(a){
     const chips = g==='En pruebas' && p.azureTest ? `<div class="flexrow" style="gap:6px;margin-top:6px;">${last7.slice().reverse().map(d => `<span class="chipcase ${perDay(d) ? 'on' : ''}" title="${esc2(fmtYmd(d))}">${esc2(fmtYmd(d, {weekday:'short', day:'numeric'}))}: <strong>${perDay(d)}</strong></span>`).join('')}</div>` : '';
     const fin = planEnd(toYmdLocal(p.testStart), p.diasPlan);
     const fechas = g==='Próximos a probar' ? (p.testStart ? 'Inicia pruebas ' + fmtDay(toYmdLocal(p.testStart)) : (isReceived(p) ? 'Recibido, sin fecha de inicio' : 'En backlog de QA'))
-      : g==='Cerrados' ? 'Cerrado ' + (closedAt(p) ? fmtDate(closedAt(p)) : '') : 'Pruebas desde ' + (p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—') + (fin ? ' · fin planeado ' + fmtDay(fin) : '');
+      : g==='Cerrados' ? 'Cerrado ' + (closedAt(p) ? fmtDate(closedAt(p)) : '') : 'Pruebas desde ' + (p.testStart ? fmtDay(toYmdLocal(p.testStart)) : '—') + (fin ? ' · fin planeado ' + fmtDay(fin) : '') + (frozenOn(p, today) ? ' · ❄ Congelado por prioridad de otro proyecto' : '');
     return `<div class="projectcard" data-act="open-project" data-id="${esc2(p.id)}" role="button" tabindex="0"><div class="top"><div><h3>${esc2(p.name)}</h3><div class="meta">${esc2(fechas)} ${badgeStatus(p)}</div></div><div class="pct">${fmtPct(pct)}</div></div>
       <div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
       <div class="small" style="margin-top:6px;">${q ? 'QA certificado <strong>' + fmtPct(q.cert) + '</strong> · probado ' + (q.ok + q.fail) : 'Sin avance de pruebas registrado'}${p.azureTest ? ' · casos ejecutados por ' + esc2(a.name.split(' ')[0]) + ': <strong>' + totalP + '</strong> · creados: <strong>' + totalC + '</strong>' : (g==='En pruebas' ? ' · <span style="color:var(--warn-ink)">sin plan de Azure vinculado</span>' : '')}</div>${chips}</div>`;
@@ -3621,6 +3649,76 @@ async function projRenameSave(){
   await patchProject(np => { np.name = name; });
   toast('Nombre actualizado');
 }
+/* ================= Archivos subidos (diseño de Figma y requerimiento): guardarlos y descargarlos =================
+   El registro vive en la colección «archivos» y el contenido en «archivos_data», en trozos de base64 (la base no admite documentos grandes).
+   Cualquier perfil que vea el proyecto puede descargarlos; solo administrador y analista asignado suben o quitan. Tope: 8 MB por archivo. */
+let archivos = [];                  // registros: {id, projectId, kind:'figma'|'req', name, mime, size, chunks, by, at}
+const FILE_MAX = 8 * 1024 * 1024, RAW_CHUNK = 524286;   // 524286 = múltiplo de 3 → ~699 mil caracteres en base64 por trozo
+const draftFiles = new Map();       // id de la entrada del borrador → File (se guarda al crear el proyecto)
+
+function b64FromBytes(u8){ let s = ''; const step = 0x8000; for(let i = 0; i < u8.length; i += step) s += String.fromCharCode.apply(null, u8.subarray(i, i + step)); return btoa(s); }
+function bytesFromB64(b){ const s = atob(b), u = new Uint8Array(s.length); for(let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+function storedMeta(id){ return id ? (archivos.find(a => a.id===id) || null) : null; }
+async function readStoredDoc(col, id){
+  if(dbAvailable){ const snap = await dbNS.collection(col).doc(id).get(); return snap && snap.exists ? snap.data() : null; }
+  const d = local[col].get(id); return d ? JSON.parse(JSON.stringify(d)) : null;
+}
+function fileTooBig(file){ return file && file.size > FILE_MAX ? '«' + file.name + '» pesa ' + figSize(file.size) + ': el máximo es 8 MB por archivo.' : ''; }
+async function dropStoredFile(fid, n){
+  for(let i = 0; i < (n || 0); i++){ try{ await stDel('archivos_data', fid + '_' + i); }catch(e){} }
+  try{ await stDel('archivos', fid); }catch(e){}
+}
+/* Guarda un archivo del proyecto y devuelve su registro; si algo falla a medias, lo deja limpio. */
+async function saveStoredFile(pid, kind, file){
+  const big = fileTooBig(file); if(big) throw {status:400, message:big};
+  const bytes = new Uint8Array(await file.arrayBuffer()), n = Math.max(1, Math.ceil(bytes.length / RAW_CHUNK));
+  const fid = await stAdd('archivos', {projectId:pid, kind, name:file.name, mime:file.type || '', size:bytes.length, chunks:n, by:whoName(), at:new Date().toISOString()});
+  try{
+    for(let i = 0; i < n; i++) await stSet('archivos_data', fid + '_' + i, {projectId:pid, fid, i, chunk:b64FromBytes(bytes.subarray(i * RAW_CHUNK, (i + 1) * RAW_CHUNK))});
+  }catch(e){ await dropStoredFile(fid, n); throw e; }
+  return {id:fid, name:file.name, size:bytes.length, mime:file.type || ''};
+}
+async function downloadStored(fid){
+  const m = storedMeta(fid); if(!m){ toast('El archivo no está disponible.'); return; }
+  if(!dlNS){ toast('La descarga no está disponible en esta vista.'); return; }
+  toast('Preparando la descarga…');
+  const parts = []; let total = 0;
+  try{
+    for(let i = 0; i < m.chunks; i++){
+      const d = await readStoredDoc('archivos_data', fid + '_' + i);
+      if(!d || typeof d.chunk !== 'string') throw new Error('falta el trozo ' + i);
+      const u = bytesFromB64(d.chunk); parts.push(u); total += u.length;
+    }
+  }catch(e){ console.error(e); toast('No se pudo leer el archivo guardado. Inténtalo de nuevo; si sigue igual, vuelve a subirlo.'); return; }
+  const out = new Uint8Array(total); let o = 0; parts.forEach(u => { out.set(u, o); o += u.length; });
+  try{ await dlNS.save({filename:m.name, data:out}); toast('Descarga lista: ' + m.name); }
+  catch(err){ const c = err && err.code; toast(c==='declined' ? 'Descarga cancelada.' : c==='rate_limited' ? 'Espera un momento y vuelve a intentarlo.' : 'No se pudo descargar el archivo.'); }
+}
+/* Botón de descarga de una entrada de Figma */
+function fileDlBtn(fid){ return `<button class="btn btn-sm" data-act="file-dl" data-id="${escapeHtml(fid)}" type="button">⬇ Descargar</button>`; }
+
+/* ---- Requerimiento original del proyecto ---- */
+function reqPanel(p){
+  const r = p.reqArchivo, m = r ? storedMeta(r.id) : null;
+  const info = r
+    ? `<span class="filepill">📎 ${escapeHtml(r.nombre || (m && m.name) || 'Requerimiento')}</span> <span class="small">${figSize(r.tamano || (m && m.size))}${r.autor ? ' · ' + escapeHtml(r.autor) : ''}${r.fecha ? ' · ' + fmtDateTime(r.fecha) : ''}</span>`
+    : '<span class="small">El archivo de requerimiento de este proyecto no se guardó (se cargó antes de que existiera la descarga). Puedes subirlo ahora.</span>';
+  const dl = r && m ? fileDlBtn(r.id) : (r ? '<span class="small">(no disponible)</span>' : '');
+  return `<div class="panel"><div class="panel-head"><div><h2>Requerimiento</h2><p class="hint">Archivo original con el que se cargó el proyecto. Todos los perfiles que ven el proyecto pueden descargarlo.</p></div></div>
+    <div class="flexrow" style="gap:10px;align-items:center;">${info}${dl}${canEdit() ? `<button class="btn btn-sm btn-ghost" data-act="req-pick" type="button">${r ? 'Reemplazar archivo' : '📎 Subir requerimiento'}</button><input type="file" id="reqFileProj" hidden />` : ''}</div></div>`;
+}
+async function reqUpload(file){
+  const p = currentProject(); if(!p || !file) return;
+  const big = fileTooBig(file); if(big){ toast(big); return; }
+  toast('Guardando el archivo…');
+  const old = p.reqArchivo && p.reqArchivo.id, oldN = old && storedMeta(old) ? storedMeta(old).chunks : 0;
+  let saved = null;
+  await guarded(async () => { saved = await saveStoredFile(p.id, 'req', file); });
+  if(!saved) return;
+  await patchProject(np => { np.reqArchivo = {id:saved.id, nombre:saved.name, tamano:saved.size, mime:saved.mime, fecha:new Date().toISOString(), autor:whoName()}; });
+  if(old) dropStoredFile(old, oldN);
+  toast('Requerimiento guardado');
+}
 
 /* ================= ROLES (la validación real está en el servidor; aquí solo se adapta la pantalla) =================
    admin: todo · pmo: ve todo, no edita · pmo_lider: solo sus proyectos, no edita, sin bitácora
@@ -3639,14 +3737,14 @@ const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','C
 function tabsForRole(){
   const r = ROLE();
   if(r==='po') return [['po','Mis proyectos'],['ambientes','Ambientes']];
-  const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo']})[r] || [];
+  const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo','azure']})[r] || [];
   return TABS_ALL.filter(t => hide.indexOf(t[0])<0);
 }
 function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
 function defaultView(){ return ROLE()==='po' ? 'po' : 'tablero'; }
 
 /* Acciones y campos permitidos a los perfiles de solo lectura */
-const RO_ACTS = new Set(['bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
+const RO_ACTS = new Set(['bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','file-dl','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
 const RO_FIELDS = new Set(['ambQ','azfEst','azfPri','az','pcom']);
 const ANALYST_BLOCK = new Set(['create','del-ask','del-yes','del-cancel','bit-add-analyst','asig-save']);
 function roleAllowsAct(act){
@@ -3770,9 +3868,14 @@ function poCard(p){
     ? `<div class="pru-big num">${fmtPct(c.cert)}</div><div class="small">QA certificado (exitosos / casos aplicables)</div><div class="progress"><div style="width:${clamp(c.cert,0,100)}%"></div></div>
        <p class="small" style="margin:8px 0 0;">Probado: <strong>${c.ok + c.fail} de ${c.base}</strong> (${fmtPct(c.probado)})${c.exito!=null ? ' · éxito sobre lo probado: <strong>' + fmtPct(c.exito) + '</strong>' : ''} · fallidos ${c.fail} · bloqueados ${c.block} · pendientes ${c.pend}${qi.at ? ' · actualizado ' + fmtDateTime(qi.at) : ''}</p>`
     : `<div class="small">Aún no hay avance de pruebas registrado.</div>`;
+  const dls = [];
+  if(p.reqArchivo && storedMeta(p.reqArchivo.id)) dls.push(`<span class="filepill">📎 ${escapeHtml(p.reqArchivo.nombre || 'Requerimiento')}</span> ${fileDlBtn(p.reqArchivo.id)}`);
+  (p.figma||[]).filter(e => e.tipo==='archivo' && storedMeta(e.archivoId)).forEach(e => dls.push(`<span class="filepill">🎨 ${escapeHtml(e.nombre || 'Diseño')}</span> ${fileDlBtn(e.archivoId)}`));
+  const filesRow = dls.length ? `<div class="flexrow" style="gap:8px 12px;align-items:center;flex-wrap:wrap;margin-top:12px;"><strong class="small">Archivos:</strong>${dls.join('')}</div>` : '';
   return `<div class="panel"><div class="panel-head"><div><h2>${escapeHtml(p.name)}</h2><p class="hint">${badgeStatus(p)}${asigInline(p)}</p></div></div>
     <div class="rowgrid"><div><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div><div class="progress ${isDone(pct)?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div></div>
       <div>${qa}</div></div>
+    ${filesRow}
     <details style="margin-top:12px;" data-key="pcom:${escapeHtml(p.id)}" ${openDetails.has('pcom:' + p.id) ? 'open' : ''}><summary><strong>Comentarios (${comentariosOf(p.id).length})</strong></summary><div style="margin-top:8px;">${comentHtml(p)}</div></details></div>`;
 }
 function viewPO(){
@@ -4500,6 +4603,18 @@ async function createProject(){
   let id = null;
   await guarded(async () => { id = await stAdd('projects', data); });
   if(!id) return;
+  /* Guardar el requerimiento y los archivos del diseño ya con el id del proyecto, y dejarlos enlazados en el proyecto. */
+  const reqFile = draft.file, figFiles = (data.figma || []).filter(x => x.tipo==='archivo' && draftFiles.get(x.id));
+  if(reqFile || figFiles.length){
+    toast('Guardando archivos del proyecto…');
+    const extra = {}, fails = [];
+    if(reqFile){ try{ const s = await saveStoredFile(id, 'req', reqFile); extra.reqArchivo = {id:s.id, nombre:s.name, tamano:s.size, mime:s.mime, fecha:new Date().toISOString(), autor:whoName()}; }catch(e){ console.error(e); fails.push(reqFile.name); } }
+    const fig2 = cloneJ(data.figma || []);
+    for(const en of fig2){ const f = en.tipo==='archivo' && draftFiles.get(en.id); if(!f) continue; try{ en.archivoId = (await saveStoredFile(id, 'figma', f)).id; }catch(e){ console.error(e); fails.push(f.name); } }
+    if(Object.keys(extra).length || fig2.length){ try{ await stSet('projects', id, Object.assign({}, data, extra, {figma:fig2})); Object.assign(data, extra, {figma:fig2}); }catch(e){ console.error(e); } }
+    if(fails.length) toast('El proyecto se creó, pero no se pudieron guardar estos archivos: ' + fails.join(', ') + '. Súbelos de nuevo desde el proyecto.');
+  }
+  draftFiles.clear();
   if(!projects.some(p => p.id===id)) projects.unshift(normalizeProject(Object.assign({id}, data)));
   draft = newDraft();
   currentView = 'proyectos'; selectedProjectId = id; mode = null;
@@ -4527,7 +4642,7 @@ async function recibirEnQA(){
 function figNew(p){ return { pid:p.id, url:'', titulo:'', comentario:'', files:[], error:'' }; }
 function figEntry(o, original){
   return { id:'f' + Date.now().toString(36) + Math.random().toString(36).slice(2,6), tipo:o.tipo, url:o.url||'', nombre:o.nombre||'', tamano:o.tamano||0, mime:o.mime||'',
-    titulo:String(o.titulo||'').slice(0,120), fecha:new Date().toISOString(), autor:whoName(), original:!!original, comentario:String(o.comentario||'').slice(0,1500) };
+    titulo:String(o.titulo||'').slice(0,120), archivoId:o.archivoId||'', fecha:new Date().toISOString(), autor:whoName(), original:!!original, comentario:String(o.comentario||'').slice(0,1500) };
 }
 async function figAdd(){
   const p = currentProject(); if(!p) return;
@@ -4537,8 +4652,13 @@ async function figAdd(){
   if(url){ const pr = figUrlProblem(url); if(pr){ f.error = pr; render(); return; } }
   const first = !(p.figma||[]).length, com = f.comentario.trim(), titulo = f.titulo.trim();
   const entries = [];
+  for(const x of f.files){ const big = fileTooBig(x.file); if(big){ f.error = big; render(); return; } }
+  if(hasFiles) toast('Guardando archivo(s)…');
+  const saved = [];
+  try{ for(const x of f.files) saved.push(await saveStoredFile(p.id, 'figma', x.file)); }
+  catch(err){ console.error(err); for(const s of saved){ const m = storedMeta(s.id); dropStoredFile(s.id, m ? m.chunks : 1); } f.error = (err && err.message && err.status<500) ? err.message : 'No se pudieron guardar los archivos. Inténtalo de nuevo.'; render(); return; }
   if(url) entries.push(figEntry({tipo:'url', url:url.slice(0,1000), titulo, comentario:com}, first));
-  f.files.forEach((x,i) => entries.push(figEntry({tipo:'archivo', nombre:x.name, tamano:x.size, mime:x.type, titulo: url ? '' : titulo, comentario:(i===0 && !url) ? com : ''}, first)));
+  f.files.forEach((x,i) => entries.push(figEntry({tipo:'archivo', nombre:x.name, tamano:saved[i].size, mime:x.type, archivoId:saved[i].id, titulo: url ? '' : titulo, comentario:(i===0 && !url) ? com : ''}, first)));
   figForm = null;
   await patchProject(np => { np.figma = (np.figma||[]).concat(entries); });
   toast(first ? 'Diseño original registrado' : 'Actualización del diseño registrada');
@@ -5115,7 +5235,9 @@ function onClick(e){
     case 'fig-pick-proj': { const i = $('#figFileProj'); if(i) i.click(); break; }
     case 'fig-add-draft': { const pr = figUrlProblem(draft.figUrl); if(pr){ draft.figError = pr; render(); break; }
       draft.figma.push(figEntry({tipo:'url', url:draft.figUrl.trim().slice(0,1000), titulo:draft.figTitulo.trim()}, true)); draft.figUrl = ''; draft.figTitulo = ''; draft.figError = ''; render(); toast('Enlace agregado'); break; }
-    case 'fig-del-draft': draft.figma = draft.figma.filter(x => x.id!==el.dataset.id); render(); break;
+    case 'fig-del-draft': draft.figma = draft.figma.filter(x => x.id!==el.dataset.id); draftFiles.delete(el.dataset.id); render(); break;
+    case 'file-dl': downloadStored(el.dataset.id); break;
+    case 'req-pick': { const i = $('#reqFileProj'); if(i) i.click(); break; }
     case 'fig-file-rm': if(figForm){ figForm.files.splice(Number(el.dataset.i),1); render(); } break;
     case 'fig-add': figAdd(); break;
     case 'fig-edit': { const fp = currentProject(); const it = fp && (fp.figma||[]).find(x => x.id===el.dataset.id); if(it){ figEdit = {id:it.id, comentario:it.comentario||''}; figDel = null; render(); } break; }
@@ -5123,7 +5245,7 @@ function onClick(e){
     case 'fig-edit-save': figSaveComment(); break;
     case 'fig-del': figDel = el.dataset.id; figEdit = null; render(); break;
     case 'fig-del-cancel': figDel = null; render(); break;
-    case 'fig-del-ok': { const id = el.dataset.id; figDel = null; patchProject(np => { np.figma = (np.figma||[]).filter(x => x.id!==id); }).then(() => toast('Quitado del historial')); break; }
+    case 'fig-del-ok': { const id = el.dataset.id; figDel = null; const cur = currentProject(), it = cur && (cur.figma||[]).find(x => x.id===id), sm = it && storedMeta(it.archivoId); patchProject(np => { np.figma = (np.figma||[]).filter(x => x.id!==id); }).then(() => { if(it && it.archivoId) dropStoredFile(it.archivoId, sm ? sm.chunks : 1); toast('Quitado del historial'); }); break; }
     case 'pick-file': { const i = $(el.dataset.kind==='bug' ? '#bugFileInput' : '#fileInput'); if(i) i.click(); break; }
     case 'remove-file':
       if(el.dataset.kind==='bug'){ if(certDraft){ certDraft.file = null; certDraft.fileName = ''; certDraft.status = ''; } }
@@ -5217,8 +5339,9 @@ function onChange(e){
   const el = e.target;
   if(el.type==='file' && !canEdit()) return;
   if(el.id==='fileInput' && el.files[0]){ draft.file = el.files[0]; draft.fileName = el.files[0].name; draft.error = null; render(); return; }
-  if(el.id==='figFileDraft' && el.files.length){ const fs = Array.from(el.files); el.value = ''; fs.forEach(f => draft.figma.push(figEntry({tipo:'archivo', nombre:f.name, tamano:f.size, mime:f.type||'', titulo:draft.figTitulo.trim()}, true))); draft.figTitulo = ''; draft.figError = ''; render(); toast(fs.length + ' archivo(s) registrado(s)'); return; }
-  if(el.id==='figFileProj' && el.files.length){ const fp = currentProject(); if(!fp) return; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); Array.from(el.files).forEach(f => figForm.files.push({name:f.name, size:f.size, type:f.type||''})); el.value = ''; render(); return; }
+  if(el.id==='figFileDraft' && el.files.length){ const fs = Array.from(el.files); el.value = ''; let bigErr = '', okN = 0; fs.forEach(f => { const big = fileTooBig(f); if(big){ bigErr = big; return; } const en = figEntry({tipo:'archivo', nombre:f.name, tamano:f.size, mime:f.type||'', titulo:draft.figTitulo.trim()}, true); draftFiles.set(en.id, f); draft.figma.push(en); okN++; }); draft.figTitulo = ''; draft.figError = bigErr; render(); if(okN) toast(okN + ' archivo(s) listo(s): se guardan al crear el proyecto'); return; }
+  if(el.id==='figFileProj' && el.files.length){ const fp = currentProject(); if(!fp) return; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); Array.from(el.files).forEach(f => { const big = fileTooBig(f); if(big) figForm.error = big; else figForm.files.push({name:f.name, size:f.size, type:f.type||'', file:f}); }); el.value = ''; render(); return; }
+  if(el.id==='reqFileProj' && el.files[0]){ const rf = el.files[0]; el.value = ''; reqUpload(rf); return; }
   if(el.id==='bugFileInput' && el.files[0]){ if(certDraft){ certDraft.file = el.files[0]; certDraft.fileName = el.files[0].name; certDraft.status = ''; render(); } return; }
   if(el.id==='ambFileInput' && el.files[0]){ const fl = el.files[0]; el.value = ''; ambImportFile(fl); return; }
   const f = el.dataset && el.dataset.f; if(!f) return;
@@ -5316,6 +5439,7 @@ async function boot(){
     sub('amb_hojas', dbNS.collection('amb_hojas').limit(30));
     sub('amb_hist', dbNS.collection('amb_hist').orderBy('fecha','desc').limit(1000));
     sub('comentarios', dbNS.collection('comentarios').orderBy('ts','asc').limit(3000));
+    sub('archivos', dbNS.collection('archivos').limit(1000));
     if(azNS || ROLE()==='po') sub('azure_bugs', dbNS.collection('azure_bugs').limit(400));
   }
 }

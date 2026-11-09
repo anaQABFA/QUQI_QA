@@ -144,6 +144,15 @@ Se envía la llave en la cabecera `Authorization: Bearer <llave>` (o `X-API-Key`
 
 **Casos de prueba creados o cargados.** Por analista y proyecto (asignado o de apoyo), por día. Solo sale de **Azure**: se cuentan los *Test Case* del plan según quién los creó (nombre de Azure igual al del analista) y su fecha de creación. Requisitos: la llave de Azure (PAT) debe tener **Work Items: Read** además de **Test Management: Read**, y el nombre del analista en QUQI debe coincidir con su nombre en Azure. Si un autor no coincide con ningún analista, esos casos no se atribuyen a nadie. Se revisan hasta 3000 casos nuevos por sincronización.
 
+## 6h. Descarga de archivos, bitácora sin almuerzo, cita médica y proyectos congelados
+
+- **Descarga de archivos:** el requerimiento y los diseños de Figma que se suben como archivo (por ejemplo un HTML) ahora se **guardan** y se pueden **descargar con el botón «⬇ Descargar»** desde el proyecto. Lo ven y lo descargan todos los perfiles (administrador, analista, PMO, PMO líder y PO; el PO lo tiene en la tarjeta de su proyecto). Solo el administrador y el analista asignado pueden subir, reemplazar o quitar. Tope: 8 MB por archivo. Los archivos de proyectos anteriores a esta versión no quedaron guardados: se pueden volver a subir desde el panel «Requerimiento» o desde Figma.
+- **Dónde se guardan:** colecciones `archivos` (datos del archivo) y `archivos_data` (contenido en trozos de base64, porque la base no admite documentos grandes). El contenido no se envía por el canal en vivo, no se lista y **no entra en el respaldo JSON** (el respaldo de Neon sí los incluye); al borrar un proyecto se borran sus archivos.
+- **Bitácora por horas:** se quitó el almuerzo (12:30 – 2:00 pm). Los bloques son 7–8, 8–9, 9–10, 10–11, **11 am – 12:30 pm** (cuenta 1,5 h) y luego 2–3, 3–4, 4–5 y 5–6 pm. Los registros de días anteriores con horas 12–1 y 1–2 se conservan y se siguen mostrando como «(anterior)».
+- **Cita médica:** nuevo estado de cada hora. Solo se registra: cuenta como hora registrada de la jornada y aparece en las fichas, la semana, el mes y el equipo, pero **no cambia la meta de 12 casos**.
+- **Proyecto congelado:** un proyecto congelado por la prioridad de otro **sigue visible** en la bandeja y en la bitácora del analista con la marca ❄; no se cuenta entre los 12 casos de la meta mientras esté congelado.
+- **Rol analista QA:** ya no ve la pestaña «Azure y ANS» (sigue en administrador, PMO y PMO líder).
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.
