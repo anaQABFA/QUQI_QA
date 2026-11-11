@@ -4323,7 +4323,7 @@ function ambResultMsg(r){
   else if(r.issueEstado==='sin_config') m += ' · Azure sin configurar: ' + (cierra ? 'cierra' : 'crea') + ' el Issue a mano';
   else if(r.issueEstado==='sin_issue') m += ' · no tenía Issue asociado';
   else if(r.issueEstado==='error') w.push(cierra ? 'no se pudo cerrar el Issue' : 'no se pudo crear el Issue');
-  if(r.correoEstado==='ok') m += ' · correo enviado';
+  if(r.correoEstado==='ok') m += r.cola ? ' · correo en cola (sale en máx. 1 minuto)' : ' · correo enviado';
   else if(r.correoEstado==='sin_config') m += ' · correo sin configurar: cópialo a mano';
   else if(r.correoEstado==='error') w.push('no se pudo enviar el correo');
   return w.length ? m + ' · ⚠ ' + w.join(' y ') + (r.errores && r.errores.length ? ' — ' + r.errores.join(' · ') : '') + ' (puedes reintentar en el incidente o el histórico)' : m;
@@ -4443,14 +4443,28 @@ async function ambExport(){
 function ambSrvStatusHtml(){
   if(!ambNS) return '';
   const s = ambSrv || {}, chip = (ok, on, off) => `<span class="badge ${ok ? 'badge-recibida' : 'badge-parcial'}"><span class="dot"></span>${ok ? on : off}</span>`;
-  return `<div class="small" style="margin:4px 0 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Envío automático:</b> ${chip(s.azure, 'Issues en Azure: activo', 'Issues en Azure: sin llave de escritura')} ${chip(s.correo, 'Correo: activo', 'Correo: sin configurar')} ${chip(s.recordatorios, 'Recordatorios cada ' + ambCfg.horasRecordatorio + ' h: activos', 'Recordatorios: apagados')}
-    <span>Las llaves y el servicio de correo se configuran en Render (variables de entorno), no aquí.</span></div>
+  return `<div class="small" style="margin:4px 0 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Envío automático:</b> ${chip(s.azure, 'Issues en Azure: activo', 'Issues en Azure: sin llave de escritura')} ${chip(s.correo, s.modoCorreo==='cola' ? 'Correo: activo (por cola)' : 'Correo: activo', 'Correo: sin configurar')} ${chip(s.recordatorios, 'Recordatorios cada ' + ambCfg.horasRecordatorio + ' h: activos', 'Recordatorios: apagados')}
+    <span>Las llaves y el servicio de correo se configuran en Render (variables de entorno), no aquí.</span></div>${ambColaHtml(s)}
     ${isAdmin() ? `<div class="flexrow" style="margin:-6px 0 14px;gap:8px;align-items:center;"><input type="text" data-f="ambTestTo" value="${escapeHtml(ambTestTo)}" placeholder="tu.correo@bancofinandina.com" style="max-width:280px;" aria-label="Correo para la prueba" /><button class="btn btn-sm" data-act="amb-mail-test" type="button" ${ambBusy ? 'disabled' : ''}>Enviar correo de prueba</button></div>${ambTestMsg ? `<div class="small" style="margin:-6px 0 14px;color:${ambTestMsg.ok===false ? 'var(--critical)' : 'inherit'};">${ambTestMsg.ok===true ? '✅ ' : ambTestMsg.ok===false ? '⚠️ ' : ''}${escapeHtml(ambTestMsg.t)}</div>` : ''}` : ''}`;
+}
+let ambColaAt = 0;
+function ambColaRefresh(){
+  if(!ambNS || !isAdmin() || !ambSrv || ambSrv.modoCorreo!=='cola' || Date.now()-ambColaAt < 30000) return;
+  ambColaAt = Date.now();
+  const key = c => c ? [c.pendientes, c.masAntiguoMin>=3, c.ultimoContactoMin==null || c.ultimoContactoMin>=5].join('|') : '';
+  ambNS.estado().then(e => { if(e){ const antes = key(ambSrv.cola); ambSrv = e; if(key(e.cola)!==antes) render(); } }).catch(()=>{});
+}
+function ambColaHtml(s){
+  ambColaRefresh();
+  if(!s || s.modoCorreo!=='cola' || !s.cola) return '';
+  const c = s.cola, atrasado = c.pendientes>0 && c.masAntiguoMin!=null && c.masAntiguoMin>=3, sinScript = c.ultimoContactoMin==null || c.ultimoContactoMin>=5;
+  if(!atrasado && !sinScript) return `<div class="small" style="margin:-6px 0 14px;">Cola de correo: ${c.pendientes ? c.pendientes + ' pendiente(s)' : 'al día'}${c.ultimoContactoMin!=null ? ' · el script la revisó hace ' + c.ultimoContactoMin + ' min' : ''}.</div>`;
+  return `<div class="small" style="margin:-6px 0 14px;color:var(--critical);">⚠ Cola de correo: ${c.pendientes} pendiente(s)${c.masAntiguoMin!=null ? ' (la más antigua lleva ' + c.masAntiguoMin + ' min)' : ''} · ${c.ultimoContactoMin==null ? 'el script de Google nunca ha consultado la cola' : 'el script de Google no la consulta desde hace ' + c.ultimoContactoMin + ' min'}. Revisa que el activador de «procesarCola» esté creado y que RENDER_URL y AMB_MAIL_SECRET del script sean correctos.</div>`;
 }
 async function ambMailTest(){
   if(!ambNS || ambBusy) return;
   ambBusy = true; ambTestMsg = {ok:null, t:'Enviando el correo de prueba…'}; render();
-  try{ await ambNS.probarCorreo(ambTestTo); ambTestMsg = {ok:true, t:'Listo: el correo de prueba salió a ' + ambTestTo.trim() + '. Revisa tu bandeja (y spam).'}; }
+  try{ const r = await ambNS.probarCorreo(ambTestTo); ambTestMsg = {ok:true, t: r && r.cola ? 'Quedó en la cola. El script de Google lo enviará a ' + ambTestTo.trim() + ' en máx. 1 minuto; revisa tu bandeja (y spam).' : 'Listo: el correo de prueba salió a ' + ambTestTo.trim() + '. Revisa tu bandeja (y spam).'}; }
   catch(e){ console.error(e); ambTestMsg = {ok:false, t: e && e.message ? e.message : 'No se pudo enviar la prueba.'}; }
   ambBusy = false; render();
 }

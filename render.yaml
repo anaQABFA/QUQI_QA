@@ -37,7 +37,7 @@ services:
         value: "30"
       - key: AZURE_DEVOPS_PAT_WRITE  # Ambientes: llave con Work Items → Read & Write para crear y cerrar los Issues (si falta, se usa AZURE_DEVOPS_PAT)
         sync: false
-      - key: AMB_MAIL_URL        # Ambientes: URL /exec del servicio de correo de Apps Script (ver apps_script_correo.gs)
+      - key: AMB_MAIL_URL        # Ambientes: URL /exec del Apps Script (modo directo). DÉJALA VACÍA para el modo cola (ver apps_script_correo_cola.gs)
         sync: false
       - key: AMB_MAIL_SECRET     # Ambientes: la misma clave que pusiste en las propiedades del Apps Script
         sync: false

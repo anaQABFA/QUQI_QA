@@ -113,6 +113,20 @@ app.get('/api/integracion/proyectos/:id', wrap(async (req, res) => {
   res.json(Object.assign({ generadoEn: new Date().toISOString() }, p));
 }));
 
+/* ---------- cola de correo de Ambientes: la recoge el Apps Script de la cuenta de Google (clave AMB_MAIL_SECRET, sin sesión) ---------- */
+app.use('/api/ambientes-cola', wrap(async (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const lock = auth.lockedFor('q:' + req.ip);
+  if (lock) return res.status(429).json({ error: 'Demasiados intentos con una clave inválida. Espera ' + lock + ' min.' });
+  const secret = String(process.env.AMB_MAIL_SECRET || ''), m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
+  const a = Buffer.from(m ? m[1] : ''), b = Buffer.from(secret);
+  if (!secret || !m || a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) { auth.noteFail('q:' + req.ip, 20); return res.status(401).json({ error: 'Clave inválida.' }); }
+  if (req.method !== 'POST') return res.status(405).set('Allow', 'POST').json({ error: 'Usa POST.' });
+  next();
+}));
+app.post('/api/ambientes-cola/pendientes', wrap(async (req, res) => res.json({ mensajes: await ambientes.colaPendientes() })));
+app.post('/api/ambientes-cola/confirmar', wrap(async (req, res) => res.json(await ambientes.colaConfirmar(req.body && req.body.ids))));
+
 /* ---------- puerta de acceso ---------- */
 app.use(wrap(async (req, res, next) => {
   const u = await auth.sessionUser(req).catch(e => { console.error(e); return null; });
@@ -504,7 +518,7 @@ function ambRate(uid) {
   if (arr.length >= 40) { ambHits.set(uid, arr); return false; }
   arr.push(now); ambHits.set(uid, arr); return true;
 }
-app.get('/api/ambientes/estado', ambOk, (req, res) => res.json(ambientes.status()));
+app.get('/api/ambientes/estado', ambOk, wrap(async (req, res) => res.json(Object.assign({}, ambientes.status(), ambientes.status().modoCorreo === 'cola' && req.user.role === 'admin' ? { cola: await ambientes.colaInfo() } : {}))));
 app.post('/api/ambientes/marcar', ambOk, wrap(async (req, res) => {
   if (!ambRate(req.user.id)) return res.status(429).json({ error: 'Demasiados cambios seguidos; espera unos minutos.' });
   try { res.json(await ambientes.setEstado(req.user, req.body, broadcast)); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
