@@ -8,6 +8,7 @@ const store = require('./lib/store');
 const ai = require('./lib/ai');
 const azure = require('./lib/azure');
 const ambientes = require('./lib/ambientes');
+const cargue = require('./lib/cargue');
 const perm = require('./lib/perm');
 const apikeys = require('./lib/apikeys');
 const metrics = require('./lib/metrics');
@@ -34,7 +35,7 @@ app.use((req, res, next) => {
 
 const bigJson = express.json({ limit: '16mb' });
 const smallJson = express.json({ limit: '2mb' });
-app.use((req, res, next) => (req.path === '/api/ai' || req.path === '/api/admin/restore') ? bigJson(req, res, next) : smallJson(req, res, next));
+app.use((req, res, next) => (req.path === '/api/ai' || req.path === '/api/admin/restore' || req.path === '/api/cargue/analizar') ? bigJson(req, res, next) : smallJson(req, res, next));
 
 /* Protección CSRF: las escrituras solo se aceptan desde nuestro propio origen. */
 app.use((req, res, next) => {
@@ -533,6 +534,30 @@ app.post('/api/ambientes/probar-correo', adminOnly, wrap(async (req, res) => {
 }));
 app.post('/api/ambientes/recordatorios', adminOnly, wrap(async (req, res) => res.json(await ambientes.runReminders(broadcast))));
 
+/* ---------- Cargue de proyectos en QA (solo administrador): Drive/archivo → HU → IA → Azure DevOps ---------- */
+const cargueHits = new Map();
+function cargueRate(uid) {
+  const now = Date.now(), arr = (cargueHits.get(uid) || []).filter(t => now - t < 300000);
+  if (arr.length >= 30) { cargueHits.set(uid, arr); return false; }
+  arr.push(now); cargueHits.set(uid, arr); return true;
+}
+app.get('/api/cargue/estado', adminOnly, wrap(async (req, res) => res.json(cargue.status())));
+app.post('/api/cargue/carpetas', adminOnly, wrap(async (req, res) => {
+  if (!cargueRate(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas; espera unos minutos.' });
+  res.json(await cargue.carpetas(req.body && req.body.raiz));
+}));
+app.post('/api/cargue/analizar', adminOnly, wrap(async (req, res) => {
+  if (!cargueRate(req.user.id)) return res.status(429).json({ error: 'Demasiadas consultas seguidas; espera unos minutos.' });
+  res.json({ id: cargue.analizar(req.user, req.body || {}) });
+}));
+app.post('/api/cargue/generar', adminOnly, wrap(async (req, res) => {
+  if (!cargueRate(req.user.id)) return res.status(429).json({ error: 'Demasiados cargues seguidos; espera unos minutos.' });
+  res.json({ id: cargue.generar(req.user, req.body || {}) });
+}));
+app.get('/api/cargue/trabajos/:id', adminOnly, wrap(async (req, res) => { const j = cargue.getJob(req.params.id, req.query.desde); j ? res.json(j) : res.status(404).json({ error: 'Ese proceso ya no está en memoria (el servidor se reinició o pasaron más de 3 horas). Revisa el historial.' }); }));
+app.get('/api/cargue/historial', adminOnly, wrap(async (req, res) => res.json(await cargue.historial())));
+app.get('/api/cargue/historial/:id', adminOnly, wrap(async (req, res) => { const d = await cargue.historialDetalle(req.params.id); d ? res.json(d) : res.status(404).json({ error: 'No existe ese registro.' }); }));
+
 app.use(express.static(path.join(__dirname, 'public'), { index: false, maxAge: '1h', setHeaders: (res, f) => { if (/\.(html|js)$/.test(f) && !/vendor/.test(f)) res.setHeader('Cache-Control', 'no-cache'); } }));
 app.use((req, res) => res.status(404).type('text').send('No encontrado'));
 
@@ -542,5 +567,6 @@ app.use((req, res) => res.status(404).type('text').send('No encontrado'));
   perm.loadPA(await store.listDocs('projects'));
   for (const u of (await db.q("SELECT id, name, role FROM users WHERE role='analista' AND active")).rows) { try { await ensureAnalyst(u); } catch (e) { console.error('Ficha de bitácora de ' + u.name + ': ' + e.message); } }
   const port = process.env.PORT || 3000;
+  await cargue.init();
   app.listen(port, () => { azure.startScheduler(broadcast, analystsList); ambientes.startScheduler(broadcast); console.log('QUQI_QA escuchando en el puerto ' + port + (ai.enabled() ? ' · IA: Gemini (' + ai.MODEL + ')' : ' · IA desactivada (falta GEMINI_API_KEY)') + (azure.enabled() ? ' · Azure DevOps: ' + azure.org() + ' (sync cada ' + azure.syncMinutes() + ' min)' : ' · Azure DevOps desactivado')); });
 })().catch(e => { console.error('No se pudo iniciar:', e.message); process.exit(1); });

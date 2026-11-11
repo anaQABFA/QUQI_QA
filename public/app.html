@@ -468,7 +468,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js?v=20261109"></script>
+<script src="/shim.js?v=20261112"></script>
 <script>
 (function(){
 'use strict';
@@ -2150,9 +2150,10 @@ function render(){
   else if(currentView==='azure') html = viewAzure();
   else if(currentView==='bitacora') html = viewBitacora();
   else if(currentView==='ambientes') html = viewAmbientes();
+  else if(currentView==='cargue') html = viewCargue();
   else if(currentView==='po') html = viewPO();
   app.innerHTML = html;
-  const wrapEl = document.querySelector('.wrap'); if(wrapEl) wrapEl.classList.toggle('wide', currentView==='ambientes');
+  const wrapEl = document.querySelector('.wrap'); if(wrapEl) wrapEl.classList.toggle('wide', currentView==='ambientes' || currentView==='cargue');
   applyRoleUI();
   window.scrollTo(0, y);
   if(fsel){ const el = $(fsel, app); if(el){ el.focus({preventScroll:true}); try{ if(pos) el.setSelectionRange(pos[0], pos[1]); }catch(e){} } }
@@ -3738,13 +3739,13 @@ function isAdmin(){ return ROLE()==='admin'; }
 function canEdit(){ const r = ROLE(); return r==='admin' || r==='analista'; }
 function canComment(){ const r = ROLE(); return r==='admin' || r==='analista' || r==='po'; }
 
-const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','Cerrados'],['nuevo','Nuevo proyecto'],['azure','Azure y ANS'],['bitacora','Bitácora diaria'],['ambientes','Ambientes']];
+const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','Cerrados'],['nuevo','Nuevo proyecto'],['azure','Azure y ANS'],['bitacora','Bitácora diaria'],['ambientes','Ambientes'],['cargue','Cargue de proyectos en QA']];
 function tabsForRole(){
   const r = ROLE();
   if(r==='po') return [['po','Mis proyectos'],['ambientes','Ambientes']];
   if(r==='ambientes') return [['ambientes','Ambientes']];
   const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo','azure']})[r] || [];
-  return TABS_ALL.filter(t => hide.indexOf(t[0])<0);
+  return TABS_ALL.filter(t => hide.indexOf(t[0])<0 && (t[0]!=='cargue' || (r==='admin' && !!cargueNS)));
 }
 function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
 function defaultView(){ const r = ROLE(); return r==='po' ? 'po' : r==='ambientes' ? 'ambientes' : 'tablero'; }
@@ -4785,6 +4786,187 @@ function ambTableroPanel(){
   return `<div class="panel tight"><div class="panel-head" style="margin-bottom:0;"><div><h2>Ambientes QA</h2><p class="hint">${n} incidente${n===1?'':'s'} abierto${n===1?'':'s'}${due ? ' · ' + due + ' con recordatorio pendiente' : ''}</p></div><button class="btn btn-sm" data-act="tab" data-tab="ambientes" type="button">Abrir ambientes</button></div></div>`;
 }
 
+/* ---------- Cargue de proyectos en QA (solo administrador, versión web): Drive / archivo → HU → IA → Azure DevOps ---------- */
+let cargueNS = null, carSt = null, carStLoading = false;
+let carTab = 'proyectos', carRaiz = '', carCarpetas = null, carMsg = '', carBusy = false;
+const carP = {};   // por proyecto (clave 'd:<idCarpeta>' o 'u' para archivo subido): {key,nombre,fuente,folderId,fase,jobId,log,res,confirm,verHu,fin}
+let carUp = { proyecto:'', nombre:'', b64:'', size:0, error:'' };
+let carHist = null, carHistDet = null, carHistLoading = false, carTimer = null;
+
+async function carLoadEstado(){
+  try{ carSt = await cargueNS.estado(); if(!carRaiz) carRaiz = carSt.carpetaRaiz || ''; }
+  catch(e){ console.error(e); carSt = {error: (e && e.message) || 'No se pudo consultar el estado.'}; }
+  carStLoading = false; render();
+}
+async function carListar(){
+  if(carBusy) return; carBusy = true; carMsg = 'Consultando Drive…'; render();
+  try{ const r = await cargueNS.carpetas(carRaiz); carCarpetas = r.carpetas; carRaiz = r.raiz; carMsg = r.carpetas.length ? '' : 'Esa carpeta no tiene subcarpetas de proyecto.'; }
+  catch(e){ console.error(e); carMsg = '⚠️ ' + ((e && e.message) || 'No se pudo listar Drive.'); }
+  carBusy = false; render();
+}
+function carPrj(key, nombre, fuente, folderId){ return carP[key] || (carP[key] = { key, nombre, fuente, folderId, fase:'idle', jobId:null, log:[], res:null, confirm:null, verHu:false, fin:null }); }
+function carEnCurso(){ return Object.keys(carP).some(k => carP[k].fase==='analizando' || carP[k].fase==='generando'); }
+async function carAnalizar(key){
+  const p = carP[key]; if(!p || p.fase==='analizando' || p.fase==='generando') return;
+  const body = { fuente:p.fuente, proyecto:p.nombre };
+  if(p.fuente==='drive') body.carpetaId = p.folderId; else { body.archivoNombre = carUp.nombre; body.archivoB64 = carUp.b64; }
+  p.fase = 'analizando'; p.log = []; p.res = null; p.fin = null; p.confirm = null; p.verHu = false; render();
+  try{ const r = await cargueNS.analizar(body); p.jobId = r.id; carStartPoll(); }
+  catch(e){ console.error(e); p.fase = 'idle'; p.log = ['❌ ' + ((e && e.message) || 'No se pudo iniciar el análisis.')]; render(); }
+}
+async function carGenerar(key){
+  const p = carP[key]; if(!p || !p.res || p.fase==='generando') return;
+  const modo = p.res.modo==='casos' ? 'casos' : 'completo';
+  p.fase = 'generando'; p.log = []; p.confirm = null; p.fin = null; render();
+  try{ const r = await cargueNS.generar({ proyecto:p.nombre, modo, historias:p.res.historias }); p.jobId = r.id; carStartPoll(); }
+  catch(e){ console.error(e); p.fase = 'listo'; p.log = ['❌ ' + ((e && e.message) || 'No se pudo iniciar el cargue.')]; render(); }
+}
+function carStartPoll(){ if(carTimer) return; carTimer = setInterval(carTick, 2000); carTick(); }
+async function carTick(){
+  const act = Object.keys(carP).map(k => carP[k]).filter(p => p.fase==='analizando' || p.fase==='generando');
+  if(!act.length){ clearInterval(carTimer); carTimer = null; return; }
+  let cambio = false;
+  for(const p of act){
+    try{
+      const j = await cargueNS.trabajo(p.jobId, p.log.length);
+      if(j.log && j.log.length){ p.log = p.log.concat(j.log); cambio = true; }
+      if(j.estado !== 'corriendo'){
+        if(p.fase==='analizando'){ p.res = j.resultado; p.fase = 'listo'; if(j.estado==='error') p.res = null; if(!p.res || !p.res.historias || !p.res.historias.length) p.fase = 'idle'; }
+        else { p.fin = { estado:j.estado, r:j.resultado }; p.fase = 'fin'; carHist = null; }
+        cambio = true;
+      }
+    }catch(e){
+      if(e && e.status===404){ p.log.push('⚠️ El servidor se reinició y se perdió el seguimiento en vivo. Revisa el Historial y Azure DevOps para ver hasta dónde llegó.'); p.fase = p.fase==='analizando' ? 'idle' : 'fin'; if(p.fase==='fin') p.fin = { estado:'interrumpido', r:null }; cambio = true; }
+    }
+  }
+  if(cambio){ render(); requestAnimationFrame(() => document.querySelectorAll('.carlog').forEach(e => { e.scrollTop = e.scrollHeight; })); }
+}
+async function carLoadHist(){
+  if(carHistLoading) return; carHistLoading = true;
+  try{ carHist = await cargueNS.historial(); }catch(e){ console.error(e); carHist = []; }
+  carHistLoading = false; render();
+}
+async function carVerHist(id){
+  try{ carHistDet = await cargueNS.historialDetalle(id); }catch(e){ console.error(e); toast('No se pudo cargar ese registro.'); }
+  render();
+}
+function carReadFile(f){
+  if(!f) return;
+  const ok = /\.(xlsx|md|markdown|txt|pdf|pptx)$/i.test(f.name);
+  if(!ok){ carUp.error = 'Formato no soportado. Sube .xlsx, .md, .txt, .pdf o .pptx (el .xls antiguo: guárdalo como .xlsx).'; carUp.nombre = ''; carUp.b64 = ''; render(); return; }
+  if(f.size > 10*1024*1024){ carUp.error = 'El archivo pesa más de 10 MB.'; carUp.nombre = ''; carUp.b64 = ''; render(); return; }
+  const rd = new FileReader();
+  rd.onload = () => { carUp = Object.assign(carUp, { nombre:f.name, size:f.size, b64:String(rd.result).split(',')[1] || '', error:'' }); const k = carP.u; if(k){ k.fase = 'idle'; k.res = null; k.log = []; } render(); };
+  rd.onerror = () => { carUp.error = 'No se pudo leer el archivo.'; render(); };
+  rd.readAsDataURL(f);
+}
+function carUpGo(){
+  const nombre = carUp.proyecto.trim();
+  if(!nombre){ toast('Escribe el nombre del proyecto (será el nombre del Feature y del Test Plan).'); return; }
+  if(!carUp.b64){ toast('Selecciona primero el archivo de requerimientos.'); return; }
+  const p = carPrj('u', nombre, 'archivo', null); p.nombre = nombre; carAnalizar('u');
+}
+
+/* ---------- vistas ---------- */
+function carBadge(estado){
+  const m = { ok:['badge-recibida','Completado'], con_errores:['badge-parcial','Con errores'], error:['ans-incumple','Falló'], interrumpido:['ans-incumple','Interrumpido'], corriendo:['badge-parcial','En curso'] }[estado] || ['badge-pendiente', estado || '—'];
+  return `<span class="badge ${m[0]}"><span class="dot"></span>${escapeHtml(m[1])}</span>`;
+}
+function carChips(){
+  const s = carSt || {}, chip = (ok, on, off) => `<span class="badge ${ok ? 'badge-recibida' : 'badge-parcial'}"><span class="dot"></span>${ok ? on : off}</span>`;
+  return `<div class="small" style="margin:4px 0 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Conexiones:</b> ${chip(s.azure, 'Azure DevOps: listo', 'Azure DevOps: sin llave')} ${chip(s.ia, 'IA (Gemini): lista', 'IA: sin GEMINI_API_KEY')} ${chip(s.drive, 'Google Drive: listo', 'Drive: sin configurar (solo puedes subir archivos)')}
+    ${s.proyectoAzure ? `<span>Destino: <b>${escapeHtml(s.proyectoAzure)}</b> · ${escapeHtml(s.area)} · ${escapeHtml(s.iteracion)}</span>` : ''}</div>`;
+}
+function carHuList(p){
+  const hs = p.res.historias;
+  if(!p.verHu) return `<button class="btn btn-sm btn-ghost" data-act="cargue-hu" data-k="${escapeHtml(p.key)}" type="button">Ver las ${hs.length} Historia(s) de Usuario detectadas</button>`;
+  return `<button class="btn btn-sm btn-ghost" data-act="cargue-hu" data-k="${escapeHtml(p.key)}" type="button">Ocultar las Historias de Usuario</button>
+    <div style="margin-top:8px;display:grid;gap:8px;">${hs.map(h => `<div class="small" style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;"><b>${escapeHtml(h.origen_hu)} — ${escapeHtml(h.titulo_hu)}</b><div>Quiero: ${escapeHtml(h.quiero || '—')}</div><div>Para: ${escapeHtml(h.para || '—')}</div><div>${h.criterios.length} criterio(s) de aceptación</div></div>`).join('')}</div>`;
+}
+function carFin(p){
+  if(!p.fin) return '';
+  const r = p.fin.r || {}, bad = p.fin.estado!=='ok';
+  return `<div class="small" style="margin-top:10px;padding:10px;border:1px solid ${bad ? 'var(--critical)' : 'var(--border)'};border-radius:8px;">${carBadge(p.fin.estado)} ${r.featureId ? ` Feature #${r.featureId}` : ''}${r.planId ? ` · Test Plan #${r.planId}` : ''} · ${r.userStories||0} User Story(s) · ${r.casos||0} caso(s) de prueba${r.omitidas ? ` · ${r.omitidas} omitida(s) por tener casos` : ''}${r.errores ? ` · <b>${r.errores} con problemas</b>` : ''}.
+    ${bad ? '<div style="margin-top:4px;">Revisa el registro de abajo; lo que ya se creó en Azure DevOps no se duplica si repites: el sistema detecta el Feature y el Test Plan existentes.</div>' : ''}</div>`;
+}
+function carCard(p){
+  const busy = p.fase==='analizando' || p.fase==='generando', r = p.res;
+  let acciones = '', estado = '';
+  if(p.fase==='idle' || p.fase==='fin' || p.fase==='listo'){
+    acciones = `<button class="btn btn-sm" data-act="cargue-analizar" data-k="${escapeHtml(p.key)}" type="button" ${busy ? 'disabled' : ''}>${r ? '↻ Volver a leer' : '👀 Extraer y previsualizar HU'}</button>`;
+  } else acciones = `<span class="small">⏳ ${p.fase==='analizando' ? 'Leyendo requerimientos…' : 'Generando en Azure DevOps…'}</span>`;
+  if(r && (p.fase==='listo' || p.fase==='fin')){
+    const bloq = r.modo==='bloqueado', casos = r.modo==='casos';
+    estado = `<div class="small" style="margin-top:10px;">${r.featureId ? `✅ Ya existe el Feature <b>#${r.featureId}</b>${r.plan ? ` y el Test Plan <b>#${r.plan.id}</b>: solo se habilita generar <b>casos de prueba</b> (las User Stories que ya tengan casos se omiten).` : ', pero no hay un Test Plan llamado «' + escapeHtml(p.nombre) + '». Para no duplicar nada a medias, créalo a mano en Azure DevOps o revisa el proyecto.'}` : '🆕 Aún no existe en Azure DevOps: se hará el flujo completo (Feature + User Stories + Test Plan + casos de prueba).'}
+      ${r.azureError ? `<div style="color:var(--critical);">⚠ ${escapeHtml(r.azureError)}</div>` : ''}</div>
+      <div class="small" style="margin-top:8px;">📄 Archivo usado: <b>${escapeHtml(r.usado || '—')}</b> · <b>${r.historias.length}</b> Historia(s) de Usuario detectada(s).</div><div style="margin-top:8px;">${carHuList(p)}</div>`;
+    if(!bloq && p.fase==='listo'){
+      const listo = carSt && carSt.azure && carSt.ia && !r.azureError;
+      if(p.confirm){
+        const t = casos ? `Se generarán con IA los casos de prueba de las User Stories del Feature #${r.featureId} que aún no los tengan.` : `Se creará en Azure DevOps el Feature «${escapeHtml(p.nombre)}», ${r.historias.length} User Stories, el Test Plan y los casos de prueba generados con IA.`;
+        estado += `<div class="small" style="margin-top:12px;padding:10px;border:1px solid var(--critical);border-radius:8px;"><b>¿Confirmas el cargue?</b> ${t} Esto escribe en Azure DevOps y no se puede deshacer desde aquí.
+          <div class="flexrow" style="margin-top:8px;gap:8px;"><button class="btn btn-sm btn-primary" data-act="cargue-generar" data-k="${escapeHtml(p.key)}" type="button">Sí, cargar</button><button class="btn btn-sm btn-ghost" data-act="cargue-cancelar" data-k="${escapeHtml(p.key)}" type="button">Cancelar</button></div></div>`;
+      } else estado += `<div style="margin-top:12px;"><button class="btn btn-sm btn-primary" data-act="cargue-confirmar" data-k="${escapeHtml(p.key)}" type="button" ${listo ? '' : 'disabled'}>${casos ? '🧪 Generar solo casos de prueba' : '🚀 Generar en Azure DevOps'}</button>${listo ? '' : ' <span class="small">Falta configurar Azure DevOps o la IA.</span>'}</div>`;
+    }
+  }
+  const log = p.log.length ? `<pre class="msgpre carlog" style="margin-top:10px;max-height:320px;overflow:auto;white-space:pre-wrap;">${escapeHtml(p.log.join('\n'))}</pre>` : '';
+  return `<div class="panel" style="margin-bottom:12px;"><div class="flexrow" style="justify-content:space-between;align-items:center;gap:10px;"><h3 style="margin:0;">📁 ${escapeHtml(p.nombre)}</h3><div>${acciones}</div></div>${estado}${p.fase==='fin' ? carFin(p) : ''}${log}</div>`;
+}
+function carViewProyectos(){
+  const lista = (carCarpetas || []).map(c => carCard(carPrj('d:' + c.id, c.name, 'drive', c.id))).join('');
+  return `<div class="flexrow" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;"><input type="text" data-f="carRaiz" value="${escapeHtml(carRaiz)}" placeholder="ID de la carpeta raíz en Drive" style="max-width:360px;" aria-label="ID de la carpeta raíz en Drive" />
+    <button class="btn btn-sm btn-primary" data-act="cargue-listar" type="button" ${carBusy || !(carSt && carSt.drive) ? 'disabled' : ''}>🔄 Refrescar lista de requerimientos en Drive</button>${carSt && !carSt.drive ? '<span class="small">Drive no está configurado: usa «Subir archivo».</span>' : ''}</div>
+    <div class="small" style="margin-bottom:12px;">La carpeta raíz es la de «Unidad QA / Requerimientos / 2026 / QA» (su ID se ve en la URL de Drive). Cada subcarpeta es un proyecto.</div>
+    ${carMsg ? `<div class="small" style="margin-bottom:10px;">${escapeHtml(carMsg)}</div>` : ''}${lista || (carCarpetas ? '' : '<div class="small">Pulsa «Refrescar lista…» para ver los proyectos de Drive.</div>')}`;
+}
+function carViewSubir(){
+  const p = carP.u;
+  return `<div class="panel" style="margin-bottom:12px;"><div class="small" style="margin-bottom:10px;">Para un proyecto que no está en Drive: sube su archivo de requerimientos (Excel .xlsx con el formato de siempre, Markdown, texto, PDF o PowerPoint). El nombre del proyecto será el del Feature, el Test Plan y la etiqueta.</div>
+    <div class="flexrow" style="gap:10px;align-items:center;flex-wrap:wrap;"><input type="text" data-f="carUpProy" value="${escapeHtml(carUp.proyecto)}" placeholder="Nombre del proyecto (ej. P2M)" style="max-width:320px;" aria-label="Nombre del proyecto" />
+      <input type="file" id="carFile" accept=".xlsx,.md,.markdown,.txt,.pdf,.pptx" aria-label="Archivo de requerimientos" />
+      <button class="btn btn-sm btn-primary" data-act="cargue-up-go" type="button" ${p && (p.fase==='analizando' || p.fase==='generando') ? 'disabled' : ''}>👀 Extraer y previsualizar HU</button></div>
+    ${carUp.nombre ? `<div class="small" style="margin-top:8px;">📎 ${escapeHtml(carUp.nombre)} (${Math.round(carUp.size/1024)} KB)</div>` : ''}${carUp.error ? `<div class="small" style="margin-top:8px;color:var(--critical);">⚠ ${escapeHtml(carUp.error)}</div>` : ''}</div>${p ? carCard(p) : ''}`;
+}
+function carViewHist(){
+  if(carHist===null && !carHistLoading) carLoadHist();
+  const tipo = t => t==='generar' ? 'Cargue a Azure' : 'Lectura de requerimientos';
+  const res = r => !r ? '—' : r.casos!=null ? `${r.userStories||0} US · ${r.casos||0} casos${r.errores ? ' · ' + r.errores + ' con problemas' : ''}${r.featureId ? ' · Feature #' + r.featureId : ''}` : `${r.historias||0} HU${r.usado ? ' en ' + escapeHtml(r.usado) : ''}`;
+  const rows = (carHist || []).map(h => `<tr><td class="small" style="white-space:nowrap;">${fmtDateTime(h.inicio)}</td><td>${escapeHtml(h.proyecto)}</td><td class="small">${tipo(h.tipo)}</td><td>${carBadge(h.estado)}</td><td class="small">${res(h.resumen)}</td><td class="small">${escapeHtml(h.usuario || '')}</td><td><button class="btn btn-sm btn-ghost" data-act="cargue-hist-ver" data-k="${escapeHtml(h.id)}" type="button">Ver registro</button></td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><div><h2>Historial de cargues</h2><p class="hint">Los últimos 60 procesos (lecturas y cargues a Azure DevOps).</p></div><button class="btn btn-sm" data-act="cargue-hist-reload" type="button">↻ Actualizar</button></div>
+    <div class="tablewrap"><table class="ambtbl"><thead><tr><th>Fecha</th><th>Proyecto</th><th>Proceso</th><th>Estado</th><th>Resultado</th><th>Quién</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="small" style="padding:14px;">${carHist===null ? 'Cargando…' : 'Aún no hay procesos.'}</td></tr>`}</tbody></table></div>
+    ${carHistDet ? `<h3 style="margin:16px 0 6px;">Registro: ${escapeHtml(carHistDet.proyecto)} · ${fmtDateTime(carHistDet.inicio)}</h3><pre class="msgpre" style="max-height:420px;overflow:auto;white-space:pre-wrap;">${escapeHtml((carHistDet.log || []).join('\n') || '(sin registro)')}</pre>` : ''}</div>`;
+}
+function viewCargue(){
+  if(!cargueNS) return `<div class="panel"><h2>Cargue de proyectos en QA</h2><p class="hint">Este módulo está disponible en la versión web (con servidor) para el administrador.</p></div>`;
+  if(carSt===null && !carStLoading){ carStLoading = true; carLoadEstado(); }
+  const tab = (id, label) => `<button class="chipbtn ${carTab===id ? 'active' : ''}" data-act="cargue-tab" data-t="${id}" type="button">${label}</button>`;
+  return `<div class="panel"><div class="panel-head"><div><h2>Cargue de proyectos en QA</h2><p class="hint">Lee los requerimientos (Drive o archivo), detecta las Historias de Usuario y publica en Azure DevOps el Feature, las User Stories, el Test Plan y los casos de prueba diseñados con IA.</p></div></div>
+    ${carSt && carSt.error ? `<div class="small" style="color:var(--critical);margin-bottom:10px;">⚠ ${escapeHtml(carSt.error)}</div>` : ''}${carChips()}
+    <div class="flexrow" style="gap:8px;margin-bottom:14px;">${tab('proyectos', 'Proyectos en Drive')}${tab('subir', 'Subir archivo')}${tab('historial', 'Historial')}</div>
+    ${carTab==='proyectos' ? carViewProyectos() : carTab==='subir' ? carViewSubir() : carViewHist()}</div>`;
+}
+
+/* ---------- eventos ---------- */
+function carClick(act, el){
+  const k = el.dataset.k;
+  switch(act){
+    case 'cargue-tab': carTab = el.dataset.t; render(); break;
+    case 'cargue-listar': carListar(); break;
+    case 'cargue-analizar': carAnalizar(k); break;
+    case 'cargue-hu': if(carP[k]){ carP[k].verHu = !carP[k].verHu; render(); } break;
+    case 'cargue-confirmar': if(carP[k]){ carP[k].confirm = true; render(); } break;
+    case 'cargue-cancelar': if(carP[k]){ carP[k].confirm = null; render(); } break;
+    case 'cargue-generar': carGenerar(k); break;
+    case 'cargue-up-go': carUpGo(); break;
+    case 'cargue-hist-ver': carVerHist(k); break;
+    case 'cargue-hist-reload': carHist = null; carHistDet = null; render(); break;
+  }
+}
+function carInput(f, el){
+  if(f==='carRaiz') carRaiz = el.value;
+  else if(f==='carUpProy') carUp.proyecto = el.value;
+}
+
 /* ================= acciones ================= */
 function cloneJ(o){ return JSON.parse(JSON.stringify(o)); }
 function equalizeCrit(h){ const sh = equalShares(h.criterios.length); h.criterios.forEach((c,i) => { c.pesoPct = sh[i]; }); }
@@ -5364,6 +5546,7 @@ function onClick(e){
   if(roleClick(act, el)) return;
   if(bitClick(act, el)) return;
   if(act.indexOf('amb-')===0){ ambClick(act, el); return; }
+  if(act.indexOf('cargue-')===0){ carClick(act, el); return; }
   const sc = el.closest('[data-scope]');
   const scope = el.dataset.scope || (sc && sc.dataset.scope);
   const hi = el.dataset.hu!=null ? Number(el.dataset.hu) : null;
@@ -5521,6 +5704,7 @@ function onInput(e){
   if(roleInput(f, el)) return;
   if(bitInput(f, el)) return;
   if(f.indexOf('amb')===0){ ambInput(f, el); return; }
+  if(f.indexOf('car')===0 && (f==='carRaiz' || f==='carUpProy')){ carInput(f, el); return; }
   if(el.tagName==='SELECT' || el.type==='checkbox') return;   // se manejan en 'change'
   const scope = el.dataset.scope, hi = el.dataset.hu!=null ? Number(el.dataset.hu) : null, ci = el.dataset.c!=null ? Number(el.dataset.c) : null;
   const list = scope ? listFor(scope) : null;
@@ -5566,6 +5750,7 @@ function onChange(e){
   if(el.id==='figFileProj' && el.files.length){ const fp = currentProject(); if(!fp) return; if(!figForm || figForm.pid!==fp.id) figForm = figNew(fp); Array.from(el.files).forEach(f => { const big = fileTooBig(f); if(big) figForm.error = big; else figForm.files.push({name:f.name, size:f.size, type:f.type||'', file:f}); }); el.value = ''; render(); return; }
   if(el.id==='reqFileProj' && el.files[0]){ const rf = el.files[0]; el.value = ''; reqUpload(rf); return; }
   if(el.id==='bugFileInput' && el.files[0]){ if(certDraft){ certDraft.file = el.files[0]; certDraft.fileName = el.files[0].name; certDraft.status = ''; render(); } return; }
+  if(el.id==='carFile' && el.files[0]){ carReadFile(el.files[0]); return; }
   if(el.id==='ambFileInput' && el.files[0]){ const fl = el.files[0]; el.value = ''; ambImportFile(fl); return; }
   const f = el.dataset && el.dataset.f; if(!f) return;
   if(!roleAllowsField(f)){ roleDenied(); return; }
@@ -5627,6 +5812,8 @@ async function boot(){
   try{ if(window.__me && window.__me.azure && window.__me.azure.enabled && window.claude && window.claude.use && ROLE()!=='po' && ROLE()!=='ambientes'){ azNS = await window.claude.use('azure'); azInfo = window.__me.azure; } }catch(e){ azNS = null; }
   /* Ambientes: el servidor crea/cierra el Issue y envía el correo (solo en la versión web) */
   try{ ambNS = (window.__me && window.claude && window.claude.use) ? await window.claude.use('ambientes') : null; ambSrv = ambNS ? (window.__me.ambientes || {}) : null; }catch(e){ ambNS = null; ambSrv = null; }
+  /* Cargue de proyectos en QA: solo el administrador y solo con servidor */
+  try{ cargueNS = (window.__me && window.claude && window.claude.use && ROLE()==='admin') ? await window.claude.use('cargue') : null; }catch(e){ cargueNS = null; }
   await loadRoster();
   currentView = defaultView();
 

@@ -142,6 +142,17 @@
     probarCorreo: to => api('POST', '/api/ambientes/probar-correo', { to })
   };
 
+  /* ---------- Cargue de proyectos en QA (solo administrador) ---------- */
+  const cargueNS = {
+    estado: () => api('GET', '/api/cargue/estado'),
+    carpetas: raiz => api('POST', '/api/cargue/carpetas', { raiz }),
+    analizar: body => api('POST', '/api/cargue/analizar', body),
+    generar: body => api('POST', '/api/cargue/generar', body),
+    trabajo: (id, desde) => api('GET', '/api/cargue/trabajos/' + encodeURIComponent(id) + '?desde=' + (+desde || 0)),
+    historial: () => api('GET', '/api/cargue/historial'),
+    historialDetalle: id => api('GET', '/api/cargue/historial/' + encodeURIComponent(id))
+  };
+
   /* ---------- usuarios (solo el administrador: para asignar proyectos) ---------- */
   const rosterFn = async () => (await api('GET', '/api/admin/users')).filter(u => u.active).map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role }));
 
@@ -180,6 +191,7 @@
       if(name === 'downloads') return dlNS;
       if(name === 'azure') return me.azure && me.azure.enabled ? azureNS : null;
       if(name === 'ambientes') return ['admin','analista','po','ambientes'].includes(me.user.role) ? ambientesNS : null;
+      if(name === 'cargue') return me.user.role === 'admin' ? cargueNS : null;
       if(name === 'roster') return me.user.role === 'admin' ? rosterFn : null;
       return null;
     }

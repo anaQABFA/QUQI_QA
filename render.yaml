@@ -41,5 +41,15 @@ services:
         sync: false
       - key: AMB_MAIL_SECRET     # Ambientes: la misma clave que pusiste en las propiedades del Apps Script
         sync: false
+      - key: AZURE_DEVOPS_PROJECT   # Cargue de proyectos en QA: proyecto de Azure donde se crean Feature/US/Test Plan (por defecto «Gestion Proyectos»)
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID  # Cargue de proyectos en QA: Drive (generados una vez con setup_google_auth.py del Agente QA)
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
+        sync: false
+      - key: DRIVE_ROOT_FOLDER_ID    # carpeta raíz «Unidad QA/Requerimientos/2026/QA» (ID de la URL de Drive)
+        sync: false
       - key: AMB_REMINDER_MINUTES  # cada cuántos minutos se revisan los recordatorios automáticos
         value: "10"

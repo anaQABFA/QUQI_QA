@@ -178,6 +178,28 @@ Se envía la llave en la cabecera `Authorization: Bearer <llave>` (o `X-API-Key`
 - **Si el correo no sale:** en Ambientes → Configuración (administrador) escribe tu correo y pulsa **Enviar correo de prueba**: la pantalla (y el log de Render) dicen la causa. Las más comunes: `AMB_MAIL_URL` con solo el ID (AKfycb…) en vez de la URL completa (desde esta versión el ID solo también se acepta); la implementación del Apps Script no tiene acceso «Cualquier persona» (Google responde con una página de inicio de sesión; si tu Workspace no lo ofrece, usa el modo cola); `AMB_MAIL_URL` no es la URL que termina en `/exec`; `AMB_MAIL_SECRET` no coincide con la propiedad del script; o falta ejecutar `autorizar` en el editor. Tras cambiar el código del script hay que publicar una **nueva versión** de la implementación. El Issue y el estado ya quedan guardados; con «Reintentar» solo se reenvía el correo.
 - **Importante:** (1) cualquier llave pegada en un chat, correo o script compartido debe **revocarse** y crearse otra; las llaves viven solo en Render. (2) Mientras el Excel de Google siga con su disparador activo se enviarían **correos dobles**: apágalo cuando empieces a usar el aplicativo. (3) El correo se envía solo a direcciones `@bancofinandina.com`. (4) Cuota de Google: ~1.500 destinatarios/día en Workspace (cada correo cuenta por destinatario).
 
+## 6j. Cargue de proyectos en QA (Agente QA integrado)
+
+Pestaña **«Cargue de proyectos en QA»**, solo para el **administrador** (el servidor rechaza a los demás perfiles). Reemplaza la app de Streamlit del Agente QA: lee los requerimientos, detecta las Historias de Usuario, la IA diseña los casos de prueba y se publica todo en Azure DevOps.
+
+**Variables nuevas en Render → Environment** (todas secretas; las mismas del Agente QA):
+
+| Variable | Para qué |
+|---|---|
+| `AZURE_DEVOPS_PAT_WRITE` | Ya existe (Ambientes). Ahora además necesita **Test Management → Read & Write** para crear el Test Plan y sus suites. |
+| `AZURE_DEVOPS_PROJECT` | Proyecto de Azure donde se crea todo (por defecto `Gestion Proyectos`). Opcionales: `QA_AREA_PATH` (`Gestion Proyectos\QA`), `QA_ITERATION_PATH` (`Gestion Proyectos\Backlog`), `QA_TEST_CASE_STATE`. |
+| `GEMINI_API_KEY` (+ `GEMINI_MODEL`) | Ya existe. `GEMINI_MODEL` admite varios modelos separados por coma (`principal,respaldo`): si el primero se satura, pasa al siguiente. |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` | Lectura de Drive. Se generan **una vez** con `setup_google_auth.py` del Agente QA (corre en tu computador). Sin ellas el módulo sigue sirviendo con **Subir archivo**. |
+| `DRIVE_ROOT_FOLDER_ID` | ID de la carpeta «Unidad QA / Requerimientos / 2026 / QA» (se ve en la URL de Drive); también se puede escribir en la pantalla. |
+
+**Cómo se usa**
+1. **Proyectos en Drive:** «Refrescar lista» muestra las subcarpetas (cada una es un proyecto). En cada una, «Extraer y previsualizar HU» lee el archivo de requerimientos (prioridad `.xlsx` > `.md` > `.txt` > `.pdf` > `.pptx`; busca primero en una subcarpeta «requerimiento…») y muestra las HU detectadas y el estado en Azure.
+2. **Subir archivo:** para un proyecto que no está en Drive, escribe su nombre y sube el archivo (`.xlsx`, `.md`, `.txt`, `.pdf`, `.pptx`; máx. 10 MB). El `.xls` antiguo hay que guardarlo como `.xlsx`.
+3. Si el proyecto **no existe** en Azure: «Generar en Azure DevOps» crea el Feature, las User Stories, el Test Plan (una suite por requisito) y los casos de prueba. Si ya existen el Feature **y** el Test Plan: solo «Generar solo casos de prueba» (las User Stories que ya tienen casos se omiten). Si existe el Feature pero no el Test Plan: se bloquea para no duplicar a medias.
+4. Antes de escribir en Azure pide **confirmación**. El proceso corre en segundo plano con un registro que se actualiza solo; todo queda en el **Historial** (últimos 60 procesos, con su registro).
+
+**Notas:** PDF y PPTX primero se leen por reglas exactas (formato «HU n — título / Quiero / Para / Criterios») y solo si no hay HU en ese formato se le pide a la IA; un PDF escaneado (imagen) no tiene texto y no se puede leer sin OCR. El texto de los requerimientos sale hacia Gemini para generar los casos. Si el servidor se reinicia a mitad de un cargue, queda «Interrumpido» en el historial; al repetirlo no se duplica lo ya creado (detecta el Feature y el Test Plan). En la versión de Claude (sin servidor) el módulo no aparece.
+
 ## 7. Cosas que debes saber
 
 - **Arranque en frío:** en el plan gratuito de Render el servicio se duerme tras un rato sin visitas; la primera carga después puede tardar cerca de un minuto. Neon también «duerme» la base y despierta sola en segundos. Después, todo va normal. Para evitar la espera puedes usar un monitor externo gratuito (p. ej. UptimeRobot) que visite `https://TU-URL/healthz` cada 5–10 min, o pasar a un plan de pago.
