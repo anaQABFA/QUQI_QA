@@ -138,7 +138,8 @@
   const ambientesNS = {
     estado: () => api('GET', '/api/ambientes/estado'),
     marcar: (hojaId, rk, valor) => api('POST', '/api/ambientes/marcar', { hojaId, rk, valor }),
-    reintentar: id => api('POST', '/api/ambientes/reintentar', { id })
+    reintentar: id => api('POST', '/api/ambientes/reintentar', { id }),
+    probarCorreo: to => api('POST', '/api/ambientes/probar-correo', { to })
   };
 
   /* ---------- usuarios (solo el administrador: para asignar proyectos) ---------- */

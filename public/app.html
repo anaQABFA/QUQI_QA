@@ -4220,6 +4220,7 @@ let ambImportMsg = '';
 let ambCfgDraft = null;                  // copia editable de la configuración
 let ambReplace = false;                  // modo "reemplazar con otro Excel"
 let ambNS = null, ambSrv = null;         // servidor de Ambientes (solo versión web): crea/cierra el Issue y envía el correo
+let ambTestTo = '', ambTestMsg = null;     // prueba de correo (administrador)
 let ambBusy = false;                     // un cambio de estado en curso
 let ambRowEdit = null, ambRowDel = null; // edición de filas del catálogo (administrador)
 
@@ -4325,7 +4326,7 @@ function ambResultMsg(r){
   if(r.correoEstado==='ok') m += ' · correo enviado';
   else if(r.correoEstado==='sin_config') m += ' · correo sin configurar: cópialo a mano';
   else if(r.correoEstado==='error') w.push('no se pudo enviar el correo');
-  return w.length ? m + ' · ⚠ ' + w.join(' y ') + ' (puedes reintentar en el incidente o el histórico)' : m;
+  return w.length ? m + ' · ⚠ ' + w.join(' y ') + (r.errores && r.errores.length ? ' — ' + r.errores.join(' · ') : '') + ' (puedes reintentar en el incidente o el histórico)' : m;
 }
 async function ambSetEstadoSrv(hojaId, rk, nuevo){
   if(ambBusy){ toast('Espera un momento: se está procesando otro cambio.'); render(); return; }
@@ -4443,7 +4444,15 @@ function ambSrvStatusHtml(){
   if(!ambNS) return '';
   const s = ambSrv || {}, chip = (ok, on, off) => `<span class="badge ${ok ? 'badge-recibida' : 'badge-parcial'}"><span class="dot"></span>${ok ? on : off}</span>`;
   return `<div class="small" style="margin:4px 0 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><b>Envío automático:</b> ${chip(s.azure, 'Issues en Azure: activo', 'Issues en Azure: sin llave de escritura')} ${chip(s.correo, 'Correo: activo', 'Correo: sin configurar')} ${chip(s.recordatorios, 'Recordatorios cada ' + ambCfg.horasRecordatorio + ' h: activos', 'Recordatorios: apagados')}
-    <span>Las llaves y el servicio de correo se configuran en Render (variables de entorno), no aquí.</span></div>`;
+    <span>Las llaves y el servicio de correo se configuran en Render (variables de entorno), no aquí.</span></div>
+    ${isAdmin() ? `<div class="flexrow" style="margin:-6px 0 14px;gap:8px;align-items:center;"><input type="text" data-f="ambTestTo" value="${escapeHtml(ambTestTo)}" placeholder="tu.correo@bancofinandina.com" style="max-width:280px;" aria-label="Correo para la prueba" /><button class="btn btn-sm" data-act="amb-mail-test" type="button" ${ambBusy ? 'disabled' : ''}>Enviar correo de prueba</button></div>${ambTestMsg ? `<div class="small" style="margin:-6px 0 14px;color:${ambTestMsg.ok===false ? 'var(--critical)' : 'inherit'};">${ambTestMsg.ok===true ? '✅ ' : ambTestMsg.ok===false ? '⚠️ ' : ''}${escapeHtml(ambTestMsg.t)}</div>` : ''}` : ''}`;
+}
+async function ambMailTest(){
+  if(!ambNS || ambBusy) return;
+  ambBusy = true; ambTestMsg = {ok:null, t:'Enviando el correo de prueba…'}; render();
+  try{ await ambNS.probarCorreo(ambTestTo); ambTestMsg = {ok:true, t:'Listo: el correo de prueba salió a ' + ambTestTo.trim() + '. Revisa tu bandeja (y spam).'}; }
+  catch(e){ console.error(e); ambTestMsg = {ok:false, t: e && e.message ? e.message : 'No se pudo enviar la prueba.'}; }
+  ambBusy = false; render();
 }
 function ambHistEnvio(r){
   if(!ambNS || !r.falla) return '';
@@ -4512,6 +4521,7 @@ function ambClick(act, el){
     case 'amb-rec-done': ambRecordatorioHecho(el.dataset.k); break;
     case 'amb-sent': ambMarcarEnviado(el.dataset.k, el.dataset.v==='1'); break;
     case 'amb-retry': ambRetryRec(el.dataset.k); break;
+    case 'amb-mail-test': ambMailTest(); break;
     case 'amb-row-new': ambRowNew(el.dataset.h); break;
     case 'amb-row-edit': ambRowStart(el.dataset.h, el.dataset.r); break;
     case 'amb-row-save': ambRowSave(); break;
@@ -4529,6 +4539,7 @@ function ambClick(act, el){
 function ambInput(f, el){
   switch(f){
     case 'ambQ': ambFilter.q = el.value; render(); break;
+    case 'ambTestTo': ambTestTo = el.value; break;
     case 'ambRowF': if(ambRowEdit) ambRowEdit.c[Number(el.dataset.i)] = el.value; break;
     case 'ambCfg': ambCfgSet(el.dataset.k, el.dataset.num ? Number(el.value) : el.value); break;
   }
