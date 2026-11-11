@@ -23,8 +23,8 @@ services:
         sync: false
       - key: GEMINI_API_KEY      # llave de Google AI Studio (opcional: sin ella la IA queda apagada)
         sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+      - key: GEMINI_MODEL        # admite varios separados por coma (principal,respaldo)
+        value: gemini-3.8-flash
       - key: AZURE_DEVOPS_ORG    # nombre de tu organización en Azure DevOps (dev.azure.com/<ORG>). Opcional
         sync: false
       - key: AZURE_DEVOPS_PAT    # llave personal de SOLO LECTURA (Work Items: Read). Opcional
@@ -41,7 +41,7 @@ services:
         sync: false
       - key: AMB_MAIL_SECRET     # Ambientes: la misma clave que pusiste en las propiedades del Apps Script
         sync: false
-      - key: AZURE_DEVOPS_PROJECT   # Cargue de proyectos en QA: proyecto de Azure donde se crean Feature/US/Test Plan (por defecto «Gestion Proyectos»)
+      - key: CARGUE_AZURE_PROJECT   # Cargue de proyectos en QA: proyecto de Azure donde se crean Feature/US/Test Plan (por defecto «Gestion Proyectos»; distinto de AZURE_DEVOPS_PROJECT)
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID  # Cargue de proyectos en QA: Drive (generados una vez con setup_google_auth.py del Agente QA)
         sync: false

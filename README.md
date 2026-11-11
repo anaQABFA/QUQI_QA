@@ -36,7 +36,7 @@ git push -u origin main
 ## 3. Llave de Gemini (opcional pero recomendada)
 
 1. Entra a <https://aistudio.google.com/apikey> con una cuenta de Google y crea una **API key**.
-2. Guárdala: es `GEMINI_API_KEY`. El modelo por defecto es `gemini-2.5-flash` (variable `GEMINI_MODEL`; si Google lo renombra o lo retira, cámbialo en Render sin tocar código).
+2. Guárdala: es `GEMINI_API_KEY`. El modelo por defecto es `gemini-3.8-flash` (variable `GEMINI_MODEL`; si Google lo renombra o lo retira, cámbialo en Render sin tocar código).
 
 **Importante sobre privacidad:** los documentos de requerimientos salen del servidor hacia Google cuando alguien usa «Analizar con IA» o «Afinar con IA». Según los términos de la API de Gemini que conozco, en el nivel gratuito Google puede usar lo enviado para mejorar sus productos y en el nivel de pago no; **verifícalo en los términos vigentes y consúltalo con Seguridad de la Información / TI antes de activarla** con documentos internos del banco. Los Excel con el formato de tabla «HU / Criterio de aceptación» se leen **sin IA** y nunca salen del navegador.
 
@@ -62,7 +62,7 @@ git push -u origin main
 | `ADMIN_NAME` | `Ana Cortés` (nombre que se verá en «Registrado por») |
 | `ADMIN_PASSWORD` | clave inicial del administrador |
 | `GEMINI_API_KEY` | llave de Gemini (opcional) |
-| `GEMINI_MODEL` | `gemini-2.5-flash` |
+| `GEMINI_MODEL` | `gemini-3.8-flash` |
 | `NODE_ENV` | `production` |
 | `NODE_VERSION` | `20` |
 
@@ -187,8 +187,8 @@ Pestaña **«Cargue de proyectos en QA»**, solo para el **administrador** (el s
 | Variable | Para qué |
 |---|---|
 | `AZURE_DEVOPS_PAT_WRITE` | Ya existe (Ambientes). Ahora además necesita **Test Management → Read & Write** para crear el Test Plan y sus suites. |
-| `AZURE_DEVOPS_PROJECT` | Proyecto de Azure donde se crea todo (por defecto `Gestion Proyectos`). Opcionales: `QA_AREA_PATH` (`Gestion Proyectos\QA`), `QA_ITERATION_PATH` (`Gestion Proyectos\Backlog`), `QA_TEST_CASE_STATE`. |
-| `GEMINI_API_KEY` (+ `GEMINI_MODEL`) | Ya existe. `GEMINI_MODEL` admite varios modelos separados por coma (`principal,respaldo`): si el primero se satura, pasa al siguiente. |
+| `CARGUE_AZURE_PROJECT` | Proyecto de Azure donde se crea todo (por defecto `Gestion Proyectos`; **no** usa `AZURE_DEVOPS_PROJECT`, que es el de los bugs y puede ser otro). La organización sale de `AZURE_DEVOPS_ORG`. Opcionales: `QA_AREA_PATH` (`Gestion Proyectos\QA`), `QA_ITERATION_PATH` (`Gestion Proyectos\Backlog`), `QA_TEST_CASE_STATE`. |
+| `GEMINI_API_KEY` (+ `GEMINI_MODEL`) | Ya existe. `GEMINI_MODEL` admite varios modelos separados por coma (`principal,respaldo`): si el primero se satura o Google ya no lo ofrece (404 «no longer available»), pasa al siguiente; al final siempre prueba `gemini-3.8-flash`. Recomendado: `GEMINI_MODEL=gemini-3.8-flash`. |
 | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` | Lectura de Drive. Se generan **una vez** con `setup_google_auth.py` del Agente QA (corre en tu computador). Sin ellas el módulo sigue sirviendo con **Subir archivo**. |
 | `DRIVE_ROOT_FOLDER_ID` | ID de la carpeta «Unidad QA / Requerimientos / 2026 / QA» (se ve en la URL de Drive); también se puede escribir en la pantalla. |
 
