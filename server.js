@@ -93,6 +93,8 @@ app.use('/api/integracion', wrap(async (req, res, next) => {
   keyHits.set(k.id, h);
   req.apiKey = k; next();
 }));
+/* ⚠ NO BORRAR esta línea: integración con Fluxor (tiempo de pruebas, bugs, plan de pruebas y /detalle). Todo el código está en lib/integracion.js. */
+require('./lib/integracion')(app, wrap);
 async function integracionRows() {
   const pr = (await db.q("SELECT id, data, updated_at FROM docs WHERE col='projects'")).rows;
   const az = new Map((await db.q("SELECT id, data FROM docs WHERE col='azure_bugs'")).rows.map(r => [r.id, r.data]));
