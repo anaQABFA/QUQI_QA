@@ -74,6 +74,9 @@
   :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
 
   .wrap{ max-width:1180px; margin:0 auto; padding:20px 20px 64px; }
+  /* Ambientes QA: usa todo el ancho de la ventana y muestra completos los textos largos de las tablas */
+  .wrap.wide{ max-width:none; padding-left:28px; padding-right:28px; }
+  .wrap.wide .ambtbl .cellx{ max-width:min(520px, 38vw); white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
 
   .topbar{ display:flex; flex-wrap:wrap; gap:14px 24px; align-items:flex-start; justify-content:space-between; padding-bottom:16px; margin-bottom:18px; border-bottom:1px solid var(--border); }
   .brand{ display:flex; gap:12px; align-items:center; }
@@ -1526,7 +1529,7 @@ function ambPair(records){
     else {
       o.estado = 'Cierre';
       const t = (r.abre && byId[r.abre]) || open[key];
-      if(t && t.estado==='Abierto'){ t.estado = 'Solucionado'; t.cierre = r.fecha; t.horas = ambHorasDesde(t.fecha, r.fecha); if(!o.issue) o.issue = t.issue; }
+      if(t && t.estado==='Abierto'){ t.estado = 'Solucionado'; t.cierre = r.fecha; t.cierreId = r.id; o.abreId = t.id; t.horas = ambHorasDesde(t.fecha, r.fecha); if(!o.issue) o.issue = t.issue; }
       if(open[key] === t) delete open[key];
     }
   });
@@ -2149,6 +2152,7 @@ function render(){
   else if(currentView==='ambientes') html = viewAmbientes();
   else if(currentView==='po') html = viewPO();
   app.innerHTML = html;
+  const wrapEl = document.querySelector('.wrap'); if(wrapEl) wrapEl.classList.toggle('wide', currentView==='ambientes');
   applyRoleUI();
   window.scrollTo(0, y);
   if(fsel){ const el = $(fsel, app); if(el){ el.focus({preventScroll:true}); try{ if(pos) el.setSelectionRange(pos[0], pos[1]); }catch(e){} } }
@@ -4221,6 +4225,7 @@ let ambCfgDraft = null;                  // copia editable de la configuración
 let ambReplace = false;                  // modo "reemplazar con otro Excel"
 let ambNS = null, ambSrv = null;         // servidor de Ambientes (solo versión web): crea/cierra el Issue y envía el correo
 let ambTestTo = '', ambTestMsg = null;     // prueba de correo (administrador)
+let ambHistSel = new Set(), ambHistDel = null;   // selección para borrar del histórico (solo administrador)
 let ambBusy = false;                     // un cambio de estado en curso
 let ambRowEdit = null, ambRowDel = null; // edición de filas del catálogo (administrador)
 
@@ -4548,6 +4553,12 @@ function ambClick(act, el){
     case 'amb-cfg-defaults': ambCfgDraft = ambDefaults(); render(); toast('Valores originales cargados: guarda para aplicarlos.'); break;
     case 'amb-replace': ambReplace = !ambReplace; render(); break;
     case 'amb-export': ambExport(); break;
+    case 'amb-hsel': if(isAdmin()) ambHistToggle(el.dataset.k); break;
+    case 'amb-hsel-sol': if(isAdmin()) ambHistSelSolved(); break;
+    case 'amb-hsel-none': ambHistSel = new Set(); ambHistDel = null; render(); break;
+    case 'amb-hdel': if(isAdmin() && ambHistSel.size){ ambHistDel = Array.from(ambHistSel); render(); } break;
+    case 'amb-hdel-cancel': ambHistDel = null; render(); break;
+    case 'amb-hdel-ok': ambHistDelete(); break;
   }
 }
 function ambInput(f, el){
@@ -4682,20 +4693,53 @@ function ambHojaView(h){
     <div class="tablewrap"><table class="ambtbl"><thead><tr>${cols.map(i => `<th>${escapeHtml(h.headers[i] || 'Columna ' + (i+1))}</th>`).join('')}<th>Estado (Falla?)</th><th>Última actualización</th><th>Historial</th>${canAdm ? '<th></th>' : ''}</tr></thead>
       <tbody>${rowsHtml || `<tr><td colspan="${cols.length + 3 + (canAdm ? 1 : 0)}" class="small" style="padding:14px;">No hay filas con este filtro.</td></tr>`}</tbody></table></div></div>`;
 }
+/* Borrar del histórico (solo administrador). Un incidente son dos registros (falla + cierre): se borran juntos y nunca uno abierto. */
+function ambHistGroup(pairs, id){
+  const r = pairs.find(x => x.id===id); if(!r) return [];
+  const root = r.abreId || r.id, a = pairs.find(x => x.id===root); if(!a) return [id];
+  if(a.estado==='Abierto') return [];
+  const ids = new Set([a.id]); if(a.cierreId) ids.add(a.cierreId);
+  pairs.forEach(x => { if(x.abre===a.id) ids.add(x.id); });
+  return Array.from(ids);
+}
+function ambHistToggle(id){
+  const g = ambHistGroup(ambPair(ambHist), id); if(!g.length){ toast('Ese incidente sigue abierto: ciérralo antes de borrarlo.'); return; }
+  const on = !g.every(x => ambHistSel.has(x)); g.forEach(x => on ? ambHistSel.add(x) : ambHistSel.delete(x)); ambHistDel = null; render();
+}
+function ambHistSelSolved(){
+  const pairs = ambPair(ambHist); ambHistSel = new Set(); ambHistDel = null;
+  pairs.filter(x => x.estado==='Solucionado').forEach(x => ambHistGroup(pairs, x.id).forEach(i => ambHistSel.add(i)));
+  render(); if(!ambHistSel.size) toast('No hay incidentes solucionados para seleccionar.');
+}
+async function ambHistDelete(){
+  if(!isAdmin() || !ambHistDel) return;
+  const ids = ambHistDel.slice(); ambHistDel = null; ambBusy = true; render(); let n = 0;
+  try{ for(const id of ids){ await stDel('amb_hist', id); n++; } toast('Histórico: ' + n + ' registro' + (n===1 ? '' : 's') + ' borrado' + (n===1 ? '' : 's') + '.'); }
+  catch(e){ console.error(e); toast('Se borraron ' + n + ' de ' + ids.length + ' registros; el resto no se pudo borrar. Inténtalo de nuevo.'); }
+  ambHistSel = new Set(); ambBusy = false; render();
+}
+function ambHistAdminBar(){
+  const n = ambHistSel.size;
+  if(ambHistDel) return `<div class="small" style="margin:0 0 12px;padding:10px;border:1px solid var(--critical);border-radius:8px;"><b>¿Borrar ${ambHistDel.length} registro${ambHistDel.length===1 ? '' : 's'} del histórico?</b> No se puede deshacer (los Issues de Azure no se tocan). Descarga el Excel antes si quieres conservar una copia.
+    <div class="flexrow" style="margin-top:8px;gap:8px;"><button class="btn btn-sm" data-act="amb-hdel-ok" type="button" style="border-color:var(--critical);color:var(--critical);">Sí, borrar</button><button class="btn btn-sm btn-ghost" data-act="amb-hdel-cancel" type="button">Cancelar</button></div></div>`;
+  return `<div class="flexrow" style="margin:0 0 12px;gap:8px;align-items:center;flex-wrap:wrap;"><button class="btn btn-sm" data-act="amb-hsel-sol" type="button" ${ambBusy ? 'disabled' : ''}>Seleccionar solucionados</button>${n ? `<button class="btn btn-sm btn-ghost" data-act="amb-hsel-none" type="button">Quitar selección</button><button class="btn btn-sm" data-act="amb-hdel" type="button" style="border-color:var(--critical);color:var(--critical);" ${ambBusy ? 'disabled' : ''}>🗑 Borrar seleccionados (${n})</button>` : ''}<span class="small">Solo el administrador puede borrar. Un incidente se borra completo (falla + cierre) y los abiertos no se pueden borrar.</span></div>`;
+}
 function ambHistView(){
   const pairs = ambPair(ambHist).reverse(), st = ambStats(pairs, ambNowIso());
+  const adm = isAdmin() && !!ambNS, nCols = adm ? 9 : 8;
   const rows = pairs.slice(0, 300).map(r => {
     const msgT = r.mensaje && r.imp ? r.mensaje : (ambIsSI(r.falla) ? ambMensaje('inc', r, ambCfg).text : ambMensaje('cierre', r, ambCfg).text);
     const key = 'ambmsg:' + (r.id||'');
-    return `<tr><td class="small" style="white-space:nowrap;">${fmtDateTime(r.fecha)}</td><td>${escapeHtml(r.hoja)}</td><td><div class="cellx" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div></td>
+    const chk = adm ? `<td><input type="checkbox" data-act="amb-hsel" data-k="${escapeHtml(r.id||'')}" ${ambHistSel.has(r.id) ? 'checked' : ''} ${r.estado==='Abierto' || ambBusy ? 'disabled' : ''} aria-label="Seleccionar para borrar" /></td>` : '';
+    return `<tr>${chk}<td class="small" style="white-space:nowrap;">${fmtDateTime(r.fecha)}</td><td>${escapeHtml(r.hoja)}</td><td><div class="cellx" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div></td>
       <td><span class="badge ${ambIsSI(r.falla) ? 'ans-incumple' : 'badge-recibida'}">${escapeHtml(r.falla)}</span></td><td>${r.issue ? '#' + escapeHtml(r.issue) : '—'}</td>
       <td><span class="badge ${r.estado==='Abierto' ? 'ans-incumple' : r.estado==='Solucionado' ? 'badge-recibida' : 'badge-pendiente'}">${escapeHtml(r.estado||'')}</span></td>
       <td class="small">${r.horas!=null ? (r.horas >= 48 ? Math.round(r.horas/24*10)/10 + ' d' : Math.round(r.horas*10)/10 + ' h') : '—'}</td>
       <td>${ambHistEnvio(r)}<details data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Ver correo</summary><pre class="msgpre" style="min-width:280px;">${escapeHtml(msgT)}</pre></details></td></tr>`;
   }).join('');
   return `<div class="panel"><div class="panel-head"><div><h2>Histórico de incidentes</h2><p class="hint">${st.total} incidentes · ${st.solucionados} solucionados · ${st.abiertos} abiertos${st.promHoras!=null ? ' · tiempo promedio de resolución ' + (st.promHoras >= 48 ? Math.round(st.promHoras/24*10)/10 + ' días' : Math.round(st.promHoras*10)/10 + ' h') : ''}</p></div>
-    <button class="btn btn-sm" data-act="amb-export" type="button">⬇ Histórico (Excel)</button></div>
-    <div class="tablewrap"><table class="ambtbl"><thead><tr><th>Fecha</th><th>Servicio</th><th>Detalle</th><th>Falla</th><th>Issue</th><th>Estado</th><th>Tiempo abierto</th><th>Correo</th></tr></thead><tbody>${rows || `<tr><td colspan="8" class="small" style="padding:14px;">Aún no hay incidentes registrados.</td></tr>`}</tbody></table></div>${pairs.length > 300 ? `<div class="small" style="margin-top:8px;">Se muestran los 300 más recientes; el Excel descarga todos.</div>` : ''}</div>`;
+    <button class="btn btn-sm" data-act="amb-export" type="button">⬇ Histórico (Excel)</button></div>${adm ? ambHistAdminBar() : ''}
+    <div class="tablewrap"><table class="ambtbl"><thead><tr>${adm ? '<th></th>' : ''}<th>Fecha</th><th>Servicio</th><th>Detalle</th><th>Falla</th><th>Issue</th><th>Estado</th><th>Tiempo abierto</th><th>Correo</th></tr></thead><tbody>${rows || `<tr><td colspan="${nCols}" class="small" style="padding:14px;">Aún no hay incidentes registrados.</td></tr>`}</tbody></table></div>${pairs.length > 300 ? `<div class="small" style="margin-top:8px;">Se muestran los 300 más recientes; el Excel descarga todos.</div>` : ''}</div>`;
 }
 function ambGeneralesView(){
   const g = ambGenerales; if(!g) return '';
