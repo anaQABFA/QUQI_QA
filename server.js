@@ -540,7 +540,7 @@ app.post('/api/ambientes/recordatorios', adminOnly, wrap(async (req, res) => res
 const cargueHits = new Map();
 function cargueRate(uid) {
   const now = Date.now(), arr = (cargueHits.get(uid) || []).filter(t => now - t < 300000);
-  if (arr.length >= 30) { cargueHits.set(uid, arr); return false; }
+  if (arr.length >= (+process.env.CARGUE_MAX_5MIN || 30)) { cargueHits.set(uid, arr); return false; }
   arr.push(now); cargueHits.set(uid, arr); return true;
 }
 app.get('/api/cargue/estado', adminOnly, wrap(async (req, res) => res.json(cargue.status())));
