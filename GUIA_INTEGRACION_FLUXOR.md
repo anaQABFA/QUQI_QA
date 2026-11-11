@@ -13,6 +13,7 @@ Para el equipo que desarrolla **Fluxor**. QUQI_QA ofrece una API de **solo lectu
 | GET | `/api/integracion/proyectos?estado=abiertos` | Solo abiertos. Valores: `abiertos`, `cerrados`, `en_pruebas`, `proximo`, `backlog` |
 | GET | `/api/integracion/proyectos?nombre=texto` | Proyectos cuyo nombre contiene el texto (sin distinguir mayúsculas ni tildes) |
 | GET | `/api/integracion/proyectos/{id}` | Un proyecto |
+| GET | `/api/integracion/proyectos/{id}/detalle` | Bugs de Azure vinculados, seguimiento QA (novedades) y cambios de alcance |
 
 Cabecera obligatoria: `Authorization: Bearer <llave>` (también se acepta `X-API-Key: <llave>`). La llave **no** se acepta en la URL.
 
@@ -48,6 +49,26 @@ Cabecera obligatoria: `Authorization: Bearer <llave>` (también se acepta `X-API
 - **pctExito**: exitosos / (exitosos + fallidos).
 - Si el proyecto aún no tiene avance de pruebas, `pctQaCertificado`, `pctProbado`, `pctExito` y `casos` vienen en `null`.
 - `fuentePruebas` = `azure` cuando el proyecto tiene un plan de Azure Test Plans vinculado (se actualiza solo cada pocos minutos); `manual` cuando QA registró los conteos a mano.
+
+## Campos adicionales en cada proyecto
+- **tiempoPruebas**: `diasUsados` (días hábiles de pruebas **sin contar** los días congelados por la prioridad de otro proyecto), `diasPlan`, `diasCongelados`, `congeladoAhora`, `periodosCongelado`, `diasSobrePlan`, `diasRestantes`, `iniciado`.
+- **bugs**: `vinculado` (si el proyecto tiene configurada la consulta de bugs de Azure), `total`, `abiertos`.
+- **planPruebasUrl**: enlace al plan de pruebas de Azure Test Plans vinculado (o `null`).
+
+## Detalle (`/api/integracion/proyectos/{id}/detalle`)
+```json
+{
+  "id": "e0x3...", "nombre": "036. Eco-Nómina",
+  "bugs": { "vinculado": true, "total": 2, "abiertos": 1, "sincronizadoEn": "...", "error": null,
+            "lista": [{ "id": "901", "titulo": "...", "severidad": "2 - High", "prioridad": "2", "estado": "Active", "creado": "...", "resuelto": null, "cerrado": null, "abierto": true, "url": "https://dev.azure.com/.../_workitems/edit/901" }] },
+  "seguimiento": [{ "id": "...", "tipo": "stopper", "tipoEtiqueta": "Bug stopper / bloqueante", "fecha": "2026-11-05", "hu": null, "detalle": "Bug stopper #901", "texto": "...", "estado": "Abierto", "autor": "Ana", "registradoEn": "...", "despuesDeCertificar": false }],
+  "alcance": [{ "tipo": "hu_nueva", "detalle": "Se agregó la HU HU-3 (peso 20%, 2 criterios)", "...": "..." }],
+  "planPruebasUrl": "https://dev.azure.com/.../_testPlans/define?planId=77",
+  "tiempoPruebas": { "diasUsados": 3, "diasPlan": 4, "diasCongelados": 2, "...": "..." }
+}
+```
+- **seguimiento**: todas las novedades (stopper, congelado, reanudado, bloqueado por ambiente, comentario, nota, certificado QA), más recientes primero.
+- **alcance**: solo cambios de alcance (HU nueva, criterio nuevo o actualizado, desistido, no aplicable, reactivado).
 
 ## Códigos de respuesta
 `200` correcto · `401` llave inválida o revocada · `404` proyecto inexistente · `405` método no permitido (solo GET) · `429` demasiadas consultas (máximo 120 por minuto por llave) o demasiados intentos con llave inválida.
