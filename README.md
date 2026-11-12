@@ -97,7 +97,7 @@ Nota: en el plan gratuito de Render el servicio duerme sin visitas, así que la 
 
 ## 6d. Perfiles (roles) y asignación de proyectos
 
-Los usuarios se crean en **Administración** (solo tú, administrador). Hay cinco perfiles:
+Los usuarios se crean en **Administración** (solo tú, administrador). Hay siete perfiles:
 
 | Perfil | Qué ve | Qué puede hacer |
 |---|---|---|
@@ -106,6 +106,8 @@ Los usuarios se crean en **Administración** (solo tú, administrador). Hay cinc
 | **PMO líder** | Solo los proyectos donde está asignado; **sin bitácora** | Solo lectura |
 | **Analista QA** | Solo los proyectos que tiene asignados (backlog y en pruebas) y **su propia bitácora** | Edita todo (seguimiento, criterios, pruebas, bitácora, ambientes, comentarios). **No** crea ni borra proyectos |
 | **PO** | Solo el % de entrega y el % de avance de QA de sus proyectos | Deja comentarios (hilo por proyecto) y reporta fallas en Ambientes. No edita nada más |
+| **Ambientes** | Solo la pestaña Ambientes (**QA**) | Marca el estado de los ambientes de QA y ve su histórico. No ve proyectos ni DEV |
+| **Ambientes DEV** | Solo la pestaña Ambientes (**DEV**) | Lo mismo que «Ambientes», pero solo para los ambientes de DEV. No ve proyectos ni QA |
 
 * Al **cargar un proyecto** el administrador debe elegir el **PMO líder**, el **analista QA** (quien lo aprueba y prueba) y el **PO**. Se puede cambiar después en el panel «Asignación» del detalle del proyecto.
 * **Los proyectos que ya existían no tienen asignación**: solo el administrador y la PMO los ven hasta que los asignes (abre cada proyecto → «Asignación» → Guardar).
@@ -199,6 +201,18 @@ Pestaña **«Cargue de proyectos en QA»**, solo para el **administrador** (el s
 4. Antes de escribir en Azure pide **confirmación**. El proceso corre en segundo plano con un registro que se actualiza solo; todo queda en el **Historial** (últimos 60 procesos, con su registro).
 
 **Notas:** PDF y PPTX primero se leen por reglas exactas (formato «HU n — título / Quiero / Para / Criterios», incluido el «Tech Spec» de Fluxor, donde «Yo como… Quiero… Para…» va en un mismo párrafo y los criterios son «Criterio n (id): …») y solo si no hay HU en ese formato se le pide a la IA; un PDF escaneado (imagen) no tiene texto y no se puede leer sin OCR. El texto de los requerimientos sale hacia Gemini para generar los casos. Si el servidor se reinicia a mitad de un cargue, queda «Interrumpido» en el historial; al repetirlo no se duplica lo ya creado (detecta el Feature y el Test Plan). En la versión de Claude (sin servidor) el módulo no aparece.
+
+## 6k. Mejoras: Ambientes QA / DEV, descripción del error, enlaces al Issue, bugs en la Bitácora, varias consultas de Azure y buscador
+
+1. **Buscador dentro del proyecto.** En el detalle de un proyecto hay una caja «Buscar una palabra dentro del proyecto». Filtra las historias de usuario (código, descripción y criterios), **resalta** la palabra en todo el detalle (HU, seguimiento, bugs de Azure, comentarios…), abre lo que la contiene y dice cuántas coincidencias hay por sección. Ignora mayúsculas y tildes; ▲ ▼ saltan entre coincidencias.
+2. **Descripción del error (obligatoria).** Al marcar una fila en **SI** (cualquier perfil de Ambientes: administrador, analista, PO, Ambientes y Ambientes DEV) aparece un cuadro «Describe el error» (mínimo 5 caracteres). **Esa descripción es la que se escribe en el campo Descripción del Issue de Azure DevOps** y va también en el correo y en el Histórico. Sin descripción el servidor rechaza el cambio (no crea Issue ni correo).
+3. **Issue como enlace directo.** En el incidente abierto, el aviso de cierre y el Histórico, el número del Issue es un enlace al work item en Azure DevOps (organización y proyecto salen de Ambientes → Configuración). Los correos también traen el enlace.
+4. **Bitácora: bugs con proyecto y enlace.** En «+ Bug» el analista anota el número, los minutos, el **proyecto donde lo detectó** (sugiere sus proyectos; también acepta texto libre) y, si quiere, el **enlace** del bug (si no lo escribe y el proyecto tiene Azure sincronizado, se arma solo). Corrección incluida: en la versión web esos campos quedaban deshabilitados para el analista.
+5. **Varias consultas de Azure por proyecto.** Los bugs de Banca y de App viven en proyectos de Azure distintos. En el panel «Azure DevOps · Bugs» el botón **＋ Agregar otra consulta** (hasta 4 adicionales) permite otro proyecto/área/iteración/etiqueta/padre. Los bugs se suman (sin duplicar), la tabla muestra la columna «Proyecto Azure» y cada bug enlaza a su propio proyecto. Cada consulta se puede editar o quitar.
+6. **Ambientes QA y DEV.** Nuevo perfil **Ambientes DEV** (se crea en Administración). «Ambientes» ve solo QA, «Ambientes DEV» solo DEV y el **administrador ve las dos** en pestañas «Ambientes QA» / «Ambientes DEV». Los demás perfiles (analista, PO, PMO) ven solo QA.
+   * **Crear DEV:** el administrador entra a la pestaña DEV y pulsa **Crear ambientes DEV desde QA**: copia cada hoja con «DEV» en el nombre («Servicios DEV»), todas las filas en NO, histórico vacío, y copia la configuración de QA (etiqueta del Issue «Ambiente DEV»). Se puede repetir sin pisar lo ya creado. Ajusta correos, responsables, Area/Iteration y flujo en Ambientes → ⚙ Configuración de DEV.
+   * **Correos:** el asunto lleva **[QA]** o **[DEV]** y el cuerpo dice «ambiente de QA/DEV» y «Tipo de ambiente». Los recordatorios y el histórico también van separados por ambiente.
+   * Los datos de DEV se protegen en el servidor: ni «Ambientes» ni analista/PO/PMO pueden verlos ni escribirlos, y «Ambientes DEV» no toca QA.
 
 ## 7. Cosas que debes saber
 

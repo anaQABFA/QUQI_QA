@@ -319,7 +319,10 @@
   table.slots select{ padding:6px 8px; }
   .chip{ display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border-radius:999px; background:var(--surface-alt); font-size:12px; margin:0 6px 4px 0; }
   .chip button{ border:none; background:none; cursor:pointer; color:var(--text-muted); padding:0 2px; font-size:13px; line-height:1; }
-  .bugform{ display:grid; grid-template-columns:90px 70px 1fr auto auto; gap:6px; align-items:center; margin-top:6px; }
+  mark.pq{ background:#ffe58a; color:inherit; border-radius:3px; padding:0 1px; }
+  mark.pq.cur{ background:#ffb020; outline:2px solid #e08900; }
+  @media (prefers-color-scheme: dark){ mark.pq{ background:#7a5d00; } mark.pq.cur{ background:#b57600; outline-color:#ffcc66; } }
+  .bugform{ display:grid; grid-template-columns:90px 70px minmax(150px,1fr) minmax(150px,1fr) minmax(150px,1fr) auto auto; gap:6px; align-items:center; margin-top:6px; }
   @media (max-width:720px){ .bugform{ grid-template-columns:1fr 1fr; } }
   .weekgrid td{ padding:3px 4px; font-size:11.5px; }
   .weekgrid .cell{ border-radius:6px; padding:3px 6px; min-height:24px; cursor:pointer; border:1px solid var(--gridline); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px; }
@@ -468,7 +471,7 @@
 <script src="/vendor/pdf.min.js"></script>
 <script src="/vendor/jszip.min.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
-<script src="/shim.js?v=20261112"></script>
+<script src="/shim.js?v=20261112b"></script>
 <script>
 (function(){
 'use strict';
@@ -1429,17 +1432,22 @@ const AMB_RESP_DEF = {
   'Servidores':{nombre:'Wilmer Francisco Rodriguez Suarez', correo:'wilmer.rodriguezs@bancofinandina.com'}
 };
 const AMB_CORREOS_DEF = ['ana.cortes','oliverio.chacon','rodolfo.celis','jhon.salamancag','nancy.botero','sonia.canop','cristian.sanjuan','cristian.ochoa','jorge.madridp','jessica.daza','hector.arias','wilmer.rodriguezs','diana.leonr','diana.rodriguezr','paola.arevalo'].map(x => x + '@bancofinandina.com');
-function ambDefaults(){
+/* Ambientes QA y Ambientes DEV comparten todo el código; cada uno tiene su propia configuración (documento «amb» o «amb_dev») y sus hojas
+   (las de DEV llevan id «dev-…», nombre «… DEV» y amb:'dev'). */
+const AMB_ENV_LABEL = { qa:'QA', dev:'DEV' };
+function ambEnvOf(x){ return x && x.amb==='dev' ? 'dev' : 'qa'; }
+function ambCfgId(env){ return env==='dev' ? 'amb_dev' : 'amb'; }
+function ambDefaults(env){
   return {
     correos: AMB_CORREOS_DEF.join(', '),
     evidenciaUrl: 'https://docs.google.com/spreadsheets/d/1qZUDKW2nHN11ArlwxA9LhLOx_271q5wCrmOjUMONeAU/edit?gid=1330488244#gid=1330488244',
     horasRecordatorio: 24,
-    azure: { org:'BancoFinandina', proyecto:'Gestion Proyectos', area:'Gestion Proyectos\\QA', iteracion:'Gestion Proyectos\\Backlog', etiqueta:'Ambiente QA', flujo:'QA', estadoCierre:'Cerrado' },
+    azure: { org:'BancoFinandina', proyecto:'Gestion Proyectos', area:'Gestion Proyectos\\QA', iteracion:'Gestion Proyectos\\Backlog', etiqueta: env==='dev' ? 'Ambiente DEV' : 'Ambiente QA', flujo:'QA', estadoCierre:'Cerrado' },
     resp: JSON.parse(JSON.stringify(AMB_RESP_DEF))
   };
 }
-function mergeAmb(saved){
-  const d = ambDefaults(); if(!saved) return d;
+function mergeAmb(saved, env){
+  const d = ambDefaults(env); if(!saved) return d;
   if(typeof saved.correos==='string' && saved.correos.trim()) d.correos = saved.correos;
   if(typeof saved.evidenciaUrl==='string') d.evidenciaUrl = saved.evidenciaUrl;
   if(Number(saved.horasRecordatorio) > 0) d.horasRecordatorio = Number(saved.horasRecordatorio);
@@ -1447,6 +1455,16 @@ function mergeAmb(saved){
   if(saved.resp) Object.keys(saved.resp).forEach(k => { const r = saved.resp[k] || {}; d.resp[k] = { nombre:String(r.nombre||''), correo:String(r.correo||'') }; });
   return d;
 }
+/* «Servicios DEV» usa el responsable de «Servicios». */
+function ambRespKey(hoja){ return String(hoja||'').replace(/\s+DEV$/i, ''); }
+/* Enlace directo al work item en Azure DevOps (organización y proyecto de la configuración del ambiente). */
+function ambIssueUrl(cfg, id, base){
+  const a = (cfg && cfg.azure) || {}, n = String(id||'').replace(/[^0-9]/g, '');
+  if(!n || !a.org || !a.proyecto) return '';
+  return String(base || 'https://dev.azure.com').replace(/\/+$/, '') + '/' + encodeURIComponent(a.org) + '/' + encodeURIComponent(a.proyecto) + '/_workitems/edit/' + n;
+}
+/* Texto escrito por una persona → HTML seguro para el campo Descripción de Azure (conserva los saltos de línea). */
+function ambHtml(t){ return String(t==null ? '' : t).split(/\r?\n/).map(l => ambEsc(l)).join('<br>'); }
 function ambSlug(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
 /* SI → 'SI'; NO, OCASIONALMENTE e INTERMITENTE → 'NO'; cualquier otro valor no dispara nada (igual que el script) */
 function ambValorH(v){
@@ -1561,61 +1579,64 @@ function ambTransicion(old, nuevo){
 }
 /* ---- mensajes (mismos textos del script) ---- */
 function ambEsc(s){ return String(s==null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function ambAsignado(cfg, hoja){ const r = cfg.resp && cfg.resp[hoja]; return r ? r.nombre : ''; }
+function ambAsignado(cfg, hoja){ const r = cfg.resp && (cfg.resp[hoja] || cfg.resp[ambRespKey(hoja)]); return r ? r.nombre : ''; }
 function ambAsunto(tipo, d){
-  if(tipo==='inc') return '🚨 Incidente detectado en el servicio ' + d.hoja + ' - ' + d.detalle + (d.issue ? ' - Issue #' + d.issue : '');
-  if(tipo==='cierre') return '✅ Servicio restablecido | Cierre de incidente ' + d.hoja + ' - ' + d.detalle;
-  return '⏰ Recordatorio | Incidente pendiente - ' + d.hoja + ' - ' + d.detalle;
+  const E = '[' + AMB_ENV_LABEL[ambEnvOf(d)] + '] ';
+  if(tipo==='inc') return '🚨 ' + E + 'Incidente detectado en el servicio ' + d.hoja + ' - ' + d.detalle + (d.issue ? ' - Issue #' + d.issue : '');
+  if(tipo==='cierre') return '✅ ' + E + 'Servicio restablecido | Cierre de incidente ' + d.hoja + ' - ' + d.detalle;
+  return '⏰ ' + E + 'Recordatorio | Incidente pendiente - ' + d.hoja + ' - ' + d.detalle;
 }
 function ambMensaje(tipo, d, cfg){
   const url = cfg.evidenciaUrl || '', asg = d.asignado != null ? d.asignado : ambAsignado(cfg, d.hoja), I = d.issue ? String(d.issue) : '';
+  const IL = I ? (d.issueUrl || ambIssueUrl(cfg, I)) : '', E = AMB_ENV_LABEL[ambEnvOf(d)], DE = d.descError ? String(d.descError).trim() : '';
   const a = x => '<a href="' + ambEsc(x) + '">' + ambEsc(x) + '</a>';
+  const issueTxt = IL ? I + ' → ' + IL : I, issueHtml = IL ? ambEsc(I) + ' (<a href="' + ambEsc(IL) + '">abrir en Azure DevOps</a>)' : ambEsc(I);
   let text, html;
   if(tipo==='inc'){
-    text = 'Hola, 👋\n\nSe informa que actualmente se presenta una afectación en \n' + d.hoja + '\n\n' +
-      'Información del incidente\nAmbiente/Servicio: ' + d.hoja + '\nDetalle del error: ' + d.detalle + '\n' + (I ? 'Issue generado: ' + I + ' (Azure DevOps)\n' : '') + (asg ? 'Responsable asignado: ' + asg + '\n' : '') +
+    text = 'Hola, 👋\n\nSe informa que actualmente se presenta una afectación en el ambiente de ' + E + '\n' + d.hoja + '\n\n' +
+      'Información del incidente\nTipo de ambiente: ' + E + '\nAmbiente/Servicio: ' + d.hoja + '\nDetalle del error: ' + d.detalle + '\n' + (DE ? 'Descripción del error: ' + DE + '\n' : '') + (I ? 'Issue generado: ' + I + ' (Azure DevOps)\n' : '') + (asg ? 'Responsable asignado: ' + asg + '\n' : '') +
       '\nSolicitamos tu apoyo con la atención y gestión del incidente para\nrestablecer el servicio en el menor tiempo posible.\n\n' +
-      'Puedes consultar toda la información del caso en los siguientes enlaces:\n' + (I ? 'Azure DevOps: ' + I + '\n' : '') + 'Evidencias y rutas del error:\n' + url + '\n\n' +
+      'Puedes consultar toda la información del caso en los siguientes enlaces:\n' + (I ? 'Azure DevOps: ' + issueTxt + '\n' : '') + 'Evidencias y rutas del error:\n' + url + '\n\n' +
       'Agradecemos mantener actualizado el estado del Issue hasta el cierre\ndel incidente.\n\nCordialmente,\nEquipo de QA';
-    html = 'Hola, 👋<br><br>Se informa que actualmente se presenta una afectación en <br><b>' + ambEsc(d.hoja) + '</b><br><br>' +
-      '<b>Información del incidente</b><br><b>Ambiente/Servicio:</b> ' + ambEsc(d.hoja) + '<br><b>Detalle del error:</b> ' + ambEsc(d.detalle) + '<br>' +
+    html = 'Hola, 👋<br><br>Se informa que actualmente se presenta una afectación en el ambiente de <b>' + E + '</b><br><b>' + ambEsc(d.hoja) + '</b><br><br>' +
+      '<b>Información del incidente</b><br><b>Tipo de ambiente:</b> ' + E + '<br><b>Ambiente/Servicio:</b> ' + ambEsc(d.hoja) + '<br><b>Detalle del error:</b> ' + ambEsc(d.detalle) + '<br>' + (DE ? '<b>Descripción del error:</b> ' + ambHtml(DE) + '<br>' : '') +
       (I ? '<b>Issue generado:</b> ' + ambEsc(I) + ' (Azure DevOps)<br>' : '') + (asg ? '<b>Responsable asignado:</b> ' + ambEsc(asg) + '<br>' : '') +
       '<br>Solicitamos tu apoyo con la atención y gestión del incidente para<br>restablecer el servicio en el menor tiempo posible.<br><br>' +
-      'Puedes consultar toda la información del caso en los siguientes enlaces:<br>' + (I ? '<b>Azure DevOps:</b> ' + ambEsc(I) + '<br>' : '') +
+      'Puedes consultar toda la información del caso en los siguientes enlaces:<br>' + (I ? '<b>Azure DevOps:</b> ' + issueHtml + '<br>' : '') +
       '<b>Evidencias y rutas del error:</b><br>' + a(url) + '<br><br>Agradecemos mantener actualizado el estado del Issue hasta el cierre<br>del incidente.<br><br>Cordialmente,<br><b>Equipo de QA</b>';
   } else if(tipo==='cierre'){
-    text = 'Hola, 👋\n\nNos complace informar que la afectación reportada en \n' + d.hoja + ' ha sido solucionada y actualmente el servicio opera con\nnormalidad.\n\n' +
-      'Detalle del incidente\nServicio/Ambiente: ' + d.hoja + '\nIncidente reportado: ' + d.detalle + '\nEstado: ✅ Solucionado\n\n' +
+    text = 'Hola, 👋\n\nNos complace informar que la afectación reportada en el ambiente de ' + E + '\n' + d.hoja + ' ha sido solucionada y actualmente el servicio opera con\nnormalidad.\n\n' +
+      'Detalle del incidente\nTipo de ambiente: ' + E + '\nServicio/Ambiente: ' + d.hoja + '\nIncidente reportado: ' + d.detalle + '\nEstado: ✅ Solucionado\n\n' +
       'Como parte del proceso de gestión del incidente, ' + (I ? 'el Issue ' + I + ' en Azure DevOps ha sido cerrado.\n\n' : 'el incidente ha sido cerrado.\n\n') +
       (asg ? 'Responsable de la atención: ' + asg + '\n\n' : '') +
-      'Si deseas consultar el historial del incidente, las evidencias o la gestión\nrealizada, puedes acceder a:\n' + (I ? 'Issue en Azure DevOps: ' + I + '\n' : '') + 'Archivo histórico de incidentes:\n' + url + '\n\n' +
+      'Si deseas consultar el historial del incidente, las evidencias o la gestión\nrealizada, puedes acceder a:\n' + (I ? 'Issue en Azure DevOps: ' + issueTxt + '\n' : '') + 'Archivo histórico de incidentes:\n' + url + '\n\n' +
       'Agradecemos el apoyo y la gestión realizada para restablecer el servicio en el\nmenor tiempo posible.\n\nCordialmente,\nEquipo de QA';
-    html = 'Hola, 👋<br><br>Nos complace informar que la afectación reportada en <br><b>' + ambEsc(d.hoja) + '</b> ha sido solucionada y actualmente el servicio opera con<br>normalidad.<br><br>' +
-      '<b>Detalle del incidente</b><br><b>Servicio/Ambiente:</b> ' + ambEsc(d.hoja) + '<br><b>Incidente reportado:</b> ' + ambEsc(d.detalle) + '<br><b>Estado:</b> ✅ Solucionado<br><br>' +
+    html = 'Hola, 👋<br><br>Nos complace informar que la afectación reportada en el ambiente de <b>' + E + '</b><br><b>' + ambEsc(d.hoja) + '</b> ha sido solucionada y actualmente el servicio opera con<br>normalidad.<br><br>' +
+      '<b>Detalle del incidente</b><br><b>Tipo de ambiente:</b> ' + E + '<br><b>Servicio/Ambiente:</b> ' + ambEsc(d.hoja) + '<br><b>Incidente reportado:</b> ' + ambEsc(d.detalle) + '<br><b>Estado:</b> ✅ Solucionado<br><br>' +
       'Como parte del proceso de gestión del incidente, ' + (I ? 'el <b>Issue ' + ambEsc(I) + '</b> en Azure DevOps ha sido cerrado.<br><br>' : 'el incidente ha sido cerrado.<br><br>') +
       (asg ? '<b>Responsable de la atención:</b> ' + ambEsc(asg) + '<br><br>' : '') +
-      'Si deseas consultar el historial del incidente, las evidencias o la gestión<br>realizada, puedes acceder a:<br>' + (I ? '<b>Issue en Azure DevOps:</b> ' + ambEsc(I) + '<br>' : '') +
+      'Si deseas consultar el historial del incidente, las evidencias o la gestión<br>realizada, puedes acceder a:<br>' + (I ? '<b>Issue en Azure DevOps:</b> ' + issueHtml + '<br>' : '') +
       '<b>Archivo histórico de incidentes:</b><br>' + a(url) + '<br><br>Agradecemos el apoyo y la gestión realizada para restablecer el servicio en el<br>menor tiempo posible.<br><br>Cordialmente,<br><b>Equipo de QA</b>';
   } else {
     const hrs = Math.floor(d.horas || 0);
-    text = 'Hola, 👋\n\nSe envía este recordatorio debido a que el incidente reportado continúa\nactivo y el servicio aún presenta afectaciones después de ' + hrs + ' horas\ndesde su detección.\n\n' +
-      'Información del incidente\nServicio/Ambiente: ' + d.hoja + '\nDetalle del error: ' + d.detalle + '\n' + (I ? 'Azure DevOps: ' + I + '\n' : '') + (asg ? 'Responsable asignado: ' + asg + '\n' : '') +
+    text = 'Hola, 👋\n\nSe envía este recordatorio debido a que el incidente reportado continúa\nactivo y el servicio aún presenta afectaciones en el ambiente de ' + E + ' después de ' + hrs + ' horas\ndesde su detección.\n\n' +
+      'Información del incidente\nTipo de ambiente: ' + E + '\nServicio/Ambiente: ' + d.hoja + '\nDetalle del error: ' + d.detalle + '\n' + (DE ? 'Descripción del error: ' + DE + '\n' : '') + (I ? 'Azure DevOps: ' + issueTxt + '\n' : '') + (asg ? 'Responsable asignado: ' + asg + '\n' : '') +
       '\nAgradecemos priorizar la atención de este incidente y registrar las\nactualizaciones correspondientes en Azure DevOps, indicando el avance de\nla gestión o el tiempo estimado para la normalización del servicio.\n\n' +
-      'Puedes consultar la información completa en:\n' + (I ? 'Issue en Azure DevOps: ' + I + '\n' : '') + 'Archivo de evidencias:\n' + url + '\n\n' +
+      'Puedes consultar la información completa en:\n' + (I ? 'Issue en Azure DevOps: ' + issueTxt + '\n' : '') + 'Archivo de evidencias:\n' + url + '\n\n' +
       'Agradecemos tu pronta gestión para lograr el restablecimiento del servicio.\n\nCordialmente,\nEquipo de QA';
-    html = 'Hola, 👋<br><br>Se envía este <b>recordatorio</b> debido a que el incidente reportado continúa<br>activo y el servicio aún presenta afectaciones después de ' + hrs + ' horas<br>desde su detección.<br><br>' +
-      '<b>Información del incidente</b><br><b>Servicio/Ambiente:</b> ' + ambEsc(d.hoja) + '<br><b>Detalle del error:</b> ' + ambEsc(d.detalle) + '<br>' +
-      (I ? '<b>Issue en Azure DevOps:</b> ' + ambEsc(I) + '<br>' : '') + (asg ? '<b>Responsable asignado:</b> ' + ambEsc(asg) + '<br>' : '') +
+    html = 'Hola, 👋<br><br>Se envía este <b>recordatorio</b> debido a que el incidente reportado continúa<br>activo y el servicio aún presenta afectaciones en el ambiente de <b>' + E + '</b> después de ' + hrs + ' horas<br>desde su detección.<br><br>' +
+      '<b>Información del incidente</b><br><b>Tipo de ambiente:</b> ' + E + '<br><b>Servicio/Ambiente:</b> ' + ambEsc(d.hoja) + '<br><b>Detalle del error:</b> ' + ambEsc(d.detalle) + '<br>' + (DE ? '<b>Descripción del error:</b> ' + ambHtml(DE) + '<br>' : '') +
+      (I ? '<b>Issue en Azure DevOps:</b> ' + issueHtml + '<br>' : '') + (asg ? '<b>Responsable asignado:</b> ' + ambEsc(asg) + '<br>' : '') +
       '<br>Agradecemos priorizar la atención de este incidente y registrar las<br>actualizaciones correspondientes en Azure DevOps, indicando el avance de<br>la gestión o el tiempo estimado para la normalización del servicio.<br><br>' +
-      'Puedes consultar la información completa en:<br>' + (I ? '<b>Issue en Azure DevOps:</b> ' + ambEsc(I) + '<br>' : '') + '<b>Archivo de evidencias:</b><br>' + a(url) + '<br><br>' +
+      'Puedes consultar la información completa en:<br>' + (I ? '<b>Issue en Azure DevOps:</b> ' + issueHtml + '<br>' : '') + '<b>Archivo de evidencias:</b><br>' + a(url) + '<br><br>' +
       'Agradecemos tu pronta gestión para lograr el restablecimiento del servicio.<br><br>Cordialmente,<br><b>Equipo de QA</b>';
   }
   return { subject: ambAsunto(tipo, d), text, html, to: cfg.correos };
 }
 /* Datos para crear el Issue en Azure DevOps (lo que el script mandaba por API) */
 function ambIssueDraft(d, cfg){
-  const r = (cfg.resp && cfg.resp[d.hoja]) || {};
-  return { titulo: d.hoja + ' - ' + d.detalle, descripcion: d.desc || '', area: cfg.azure.area, iteracion: cfg.azure.iteracion, etiquetas: cfg.azure.etiqueta, flujo: cfg.azure.flujo,
+  const r = (cfg.resp && (cfg.resp[d.hoja] || cfg.resp[ambRespKey(d.hoja)])) || {};
+  return { titulo: d.hoja + ' - ' + d.detalle, descripcion: d.descError || d.desc || '', area: cfg.azure.area, iteracion: cfg.azure.iteracion, etiquetas: cfg.azure.etiqueta, flujo: cfg.azure.flujo,
     asignado: r.correo || '', asignadoNombre: r.nombre || '', tipo: 'Issue', proyecto: cfg.azure.proyecto, org: cfg.azure.org };
 }
 function ambIssueText(x){
@@ -1634,7 +1655,10 @@ const $ = (sel, el) => (el||document).querySelector(sel);
 const $$ = (sel, el) => Array.from((el||document).querySelectorAll(sel));
 
 let projects = [], analistas = [], segs = [];
-let ambHojas = [], ambHist = [], ambGenerales = null, ambCfg = mergeAmb(null);
+/* Ambientes QA y DEV: los datos crudos (…All) traen los dos; ambApply() deja en ambHojas/ambHist/ambGenerales/ambCfg solo los del ambiente que se está viendo. */
+let ambHojasAll = [], ambHistAll = [], ambGeneralesAll = [], ambCfgs = { qa: mergeAmb(null, 'qa'), dev: mergeAmb(null, 'dev') };
+let ambEnv = 'qa';
+let ambHojas = [], ambHist = [], ambGenerales = null, ambCfg = ambCfgs.qa;
 const bitMap = new Map();
 let ansCfg = mergeAns(null);
 
@@ -1649,6 +1673,7 @@ let qaEdit = null;   // edición del plazo de pruebas en el detalle del proyecto
 const openDetails = new Set();
 let critForm = null;   // formulario abierto bajo un criterio: {pid, hu, c, tipo:'alcance'|'no_aplica', texto, motivo}
 const cdraft = {};      // borradores del módulo de comentarios por HU: {hu: {crit, texto}}
+let projQ = '', projQFor = null, projQIdx = 0;   // buscador de palabras dentro del detalle del proyecto
 let bit = { analystId:null, open:false, tview:'dia', date:ymd(new Date()), view:'dia', month:ymOf(new Date()), bugForm:null, saveState:'', newName:'' };
 let azure = { proyecto:'', area:'', iteracion:'', desde:'', estado:'todos', vinculo:'child' };
 /* Conexión en vivo con Azure DevOps (solo en la versión web con llave configurada en el servidor) */
@@ -1702,13 +1727,15 @@ function ingest(col, list){
   } else if(col==='config'){
     const a = list.find(d => d.id==='ans');
     ansCfg = mergeAns(a ? JSON.parse(JSON.stringify(a)) : null);
-    const am = list.find(d => d.id==='amb');
-    ambCfg = mergeAmb(am ? JSON.parse(JSON.stringify(am)) : null);
+    const am = list.find(d => d.id==='amb'), ad = list.find(d => d.id==='amb_dev');
+    ambCfgs = { qa: mergeAmb(am ? JSON.parse(JSON.stringify(am)) : null, 'qa'), dev: mergeAmb(ad ? JSON.parse(JSON.stringify(ad)) : null, 'dev') };
+    ambApply();
   } else if(col==='amb_hojas'){
-    ambHojas = list.filter(d => d.tipo!=='catalogo').sort((a,b) => (a.orden||0) - (b.orden||0));
-    ambGenerales = list.find(d => d.tipo==='catalogo') || null;
+    ambHojasAll = list.filter(d => d.tipo!=='catalogo').sort((a,b) => (a.orden||0) - (b.orden||0));
+    ambGeneralesAll = list.filter(d => d.tipo==='catalogo');
+    ambApply();
   } else if(col==='amb_hist'){
-    ambHist = list;
+    ambHistAll = list; ambApply();
   } else if(col==='comentarios'){
     comentarios = list.map(d => JSON.parse(JSON.stringify(d)));
   } else if(col==='archivos'){
@@ -2155,6 +2182,7 @@ function render(){
   app.innerHTML = html;
   const wrapEl = document.querySelector('.wrap'); if(wrapEl) wrapEl.classList.toggle('wide', currentView==='ambientes' || currentView==='cargue');
   applyRoleUI();
+  if(projQ && selectedProjectId && (currentView==='proyectos' || currentView==='cerrados')) pqHighlight();
   window.scrollTo(0, y);
   if(fsel){ const el = $(fsel, app); if(el){ el.focus({preventScroll:true}); try{ if(pos) el.setSelectionRange(pos[0], pos[1]); }catch(e){} } }
 }
@@ -2469,6 +2497,59 @@ function weightBanner(list){
 
 /* ================= detalle de proyecto ================= */
 function currentProject(){ return projects.find(p => p.id===selectedProjectId); }
+/* ---- buscador dentro del detalle del proyecto: filtra las HU y resalta la palabra en todo el detalle ---- */
+function pqFold(s){
+  let out = '', map = [];
+  Array.from(String(s==null ? '' : s)).forEach((ch, k) => { const n = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); for(let j = 0; j < n.length; j++){ out += n[j]; map.push(k); } });
+  return { s:out, map };
+}
+const pqNorm = s => pqFold(s).s;
+function pqStrings(v, out){
+  if(typeof v==='string') out.push(v); else if(typeof v==='number') out.push(String(v));
+  else if(Array.isArray(v)) v.forEach(x => pqStrings(x, out));
+  else if(v && typeof v==='object') Object.keys(v).forEach(k => pqStrings(v[k], out));
+  return out;
+}
+const pqMatchHU = (h, q) => !q || pqNorm(pqStrings(h, []).join(' \n ')).indexOf(q) >= 0;
+function pqSearchPanel(p, shown, total){
+  return `<div class="panel tight projsearch"><div class="flexrow" style="gap:8px;align-items:center;flex-wrap:wrap;">
+    <input type="search" id="projQ" data-f="projQ" value="${escapeHtml(projQ)}" placeholder="Buscar una palabra dentro del proyecto (HU, criterios, seguimiento, bugs, comentarios…)" aria-label="Buscar dentro del proyecto" style="flex:1;min-width:220px;max-width:560px;" autocomplete="off" />
+    ${projQ ? `<button class="btn btn-sm" data-act="projq-prev" type="button" aria-label="Coincidencia anterior">▲</button><button class="btn btn-sm" data-act="projq-next" type="button" aria-label="Coincidencia siguiente">▼</button><button class="btn btn-sm btn-ghost" data-act="projq-clear" type="button">Limpiar</button>` : ''}</div>
+    ${projQ ? `<div class="small" id="projQInfo" style="margin-top:6px;" role="status" aria-live="polite">${shown!=null && shown < total ? 'Historias mostradas: ' + shown + ' de ' + total + '. ' : ''}</div>` : ''}</div>`;
+}
+/* Después de pintar: resalta las coincidencias, abre lo que las contiene y cuenta cuántas hay por sección. */
+function pqHighlight(){
+  const app = $('#app'), q = pqNorm(projQ.trim()); if(!app || !q) return;
+  const roots = Array.from(app.children).filter(el => !el.classList.contains('projsearch') && !el.classList.contains('backlink'));
+  let total = 0; const bySec = [];
+  roots.forEach(root => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: n => { const t = n.parentNode && n.parentNode.nodeName; return /^(SCRIPT|STYLE|TEXTAREA|OPTION|MARK)$/.test(t) || !n.nodeValue.trim() || (n.parentNode.closest && n.parentNode.closest('[data-nohl]')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT; } });
+    const nodes = []; while(walker.nextNode()) nodes.push(walker.currentNode);
+    let n = 0;
+    nodes.forEach(node => {
+      const txt = node.nodeValue, f = pqFold(txt); let at = f.s.indexOf(q); if(at < 0) return;
+      const frag = document.createDocumentFragment(); let last = 0;
+      while(at >= 0){
+        const a = f.map[at], b = f.map[at + q.length - 1] + 1;
+        if(a >= last){ frag.appendChild(document.createTextNode(txt.slice(last, a))); const m = document.createElement('mark'); m.className = 'pq'; m.textContent = txt.slice(a, b); frag.appendChild(m); last = b; n++; }
+        at = f.s.indexOf(q, at + q.length);
+      }
+      frag.appendChild(document.createTextNode(txt.slice(last))); node.parentNode.replaceChild(frag, node);
+    });
+    if(n){ total += n; const h = root.querySelector('h2, h3'); bySec.push((h ? h.textContent.trim() : 'Proyecto') + ': ' + n); }
+  });
+  app.querySelectorAll('mark.pq').forEach(m => { let d = m.closest('details'); while(d){ d.open = true; d = d.parentElement && d.parentElement.closest('details'); } });
+  const marks = app.querySelectorAll('mark.pq');
+  if(projQIdx >= marks.length) projQIdx = 0;
+  const info = $('#projQInfo');
+  if(info) info.innerHTML = (info.textContent || '') + (total ? '<b>' + total + ' coincidencia' + (total===1 ? '' : 's') + '</b> · ' + bySec.map(escapeHtml).join(' · ') : '<b>Sin coincidencias</b> para «' + escapeHtml(projQ.trim()) + '».');
+}
+function pqGo(d){
+  const marks = $$('#app mark.pq'); if(!marks.length) return;
+  projQIdx = (projQIdx + d + marks.length) % marks.length;
+  marks.forEach((m, i) => m.classList.toggle('cur', i===projQIdx));
+  marks[projQIdx].scrollIntoView({ block:'center', behavior:'smooth' });
+}
 function viewProjectDetail(){
   const p = currentProject();
   if(!p){ selectedProjectId = null; return currentView==='cerrados' ? viewCerrados() : viewProyectos(); }
@@ -2476,11 +2557,15 @@ function viewProjectDetail(){
   const editing = mode==='edit' && work;
   const source = editing ? work : p.historias;
   const certified = p.status==='certificado';
+  if(projQFor!==(p && p.id)){ projQFor = p.id; projQ = ''; projQIdx = 0; }
+  const pq = pqNorm(projQ.trim());
+  const view = source.map((h,i) => ({h,i})).filter(x => editing || pqMatchHU(x.h, pq));
   let body = `<button class="backlink" data-act="back" type="button">← ${currentView==='cerrados' ? 'Cerrados' : 'Proyectos'}</button>`;
   body += `<div class="panel"><div class="panel-head"><div>${projTitleHtml(p)}<p class="hint">Creado ${fmtDate(p.createdAt)} por ${escapeHtml(p.createdBy||'—')} ${badgeStatus(p)}</p></div>
     <div style="text-align:right"><div class="num" style="font-size:26px;font-weight:700;">${fmtPct(pct)}</div><div class="small">entregado sobre el 100%</div></div></div>
     <div class="progress ${done?'done':''}"><div style="width:${clamp(pct,0,100)}%"></div></div>
     <div class="flexend" style="margin-top:10px;">${isClosed(p) ? `<button class="btn btn-sm btn-primary" data-act="seg-full" data-id="${escapeHtml(p.id)}" type="button">Ver todo el seguimiento</button><button class="btn btn-sm" data-act="report-pdf" data-id="${escapeHtml(p.id)}" type="button">📄 Informe PDF</button><button class="btn btn-sm" data-act="seg-download" data-id="${escapeHtml(p.id)}" type="button">⬇ Novedades (Excel)</button><button class="btn btn-sm" data-act="cert-reopen" type="button">${certified ? 'Reabrir certificación' : 'Reabrir proyecto'}</button>` : ''}<button class="btn btn-sm btn-ghost" data-act="del-ask" data-id="${escapeHtml(p.id)}" type="button">🗑 Eliminar proyecto</button></div>${delBox(p.id)}</div>`;
+  body += pqSearchPanel(p, editing ? null : view.length, source.length);
   body += asigPanel(p);
   body += recepcionPanel(p);
   body += qaClockPanel(p);
@@ -2492,7 +2577,7 @@ function viewProjectDetail(){
     <div class="flexrow">${editing
       ? `<button class="btn btn-sm btn-ghost" data-act="edit-cancel" type="button">Cancelar</button><button class="btn btn-sm btn-primary" data-act="edit-save" type="button">Guardar cambios</button>`
       : (mode==='cert' ? '' : `<button class="btn btn-sm" data-act="edit-start" type="button">Editar pesos y criterios</button>`)}</div></div>
-    ${source.length ? source.map((h,i) => huCard(h, i, editing ? 'edit' : 'view', certified, source)).join('') : `<div class="empty">Este proyecto no tiene historias registradas.</div>`}
+    ${view.length ? view.map(x => huCard(x.h, x.i, editing ? 'edit' : 'view', certified, source)).join('') : (source.length ? `<div class="empty" data-nohl="1">Ninguna historia de usuario contiene «${escapeHtml(projQ.trim())}».</div>` : `<div class="empty">Este proyecto no tiene historias registradas.</div>`)}
     <div id="huWeightBanner">${editing ? weightBanner(work) : ''}</div></div>`;
   body += segPanel(p);
   if(certified) body += certificationSummary(p);
@@ -2506,7 +2591,15 @@ function viewProjectDetail(){
 /* ================= Azure DevOps (bugs en vivo, solo lectura) ================= */
 function azDoc(p){ return p && (p.azureCfg || p.azureTest) ? (azBugs.get(p.id) || null) : null; }
 function tpNew(p){ const c = p.azureTest || {}; return { pid:p.id, proyecto:c.proyecto||'', plan:c.planNombre||c.plan||'', error:'', preview:null, busy:false }; }
-function azNew(p){ const c = p.azureCfg || {}; return { pid:p.id, proyecto:c.proyecto||'', area:c.area||'', iteracion:c.iteracion||'', tag:c.tag||'', padre:c.padre||'', preview:null, error:'', busy:false }; }
+/* idx: 0 = consulta principal (azureCfg), 1..n = consultas adicionales (azureCfgExtra), -1 = consulta adicional nueva.
+   Los bugs de Banca y de App viven en proyectos de Azure distintos: cada consulta trae los suyos y se suman. */
+const AZ_MAX_EXTRA = 4;
+function azQueries(p){ return (p && p.azureCfg ? [p.azureCfg] : []).concat(p && p.azureCfg && Array.isArray(p.azureCfgExtra) ? p.azureCfgExtra : []); }
+function azNew(p, idx){
+  idx = idx==null ? 0 : idx;
+  const c = idx===0 ? (p.azureCfg || {}) : idx>0 ? ((p.azureCfgExtra || [])[idx-1] || {}) : {};
+  return { pid:p.id, idx, proyecto:c.proyecto||'', area:c.area||'', iteracion:c.iteracion||'', tag:c.tag||'', padre:c.padre||'', preview:null, error:'', busy:false };
+}
 function azCfgFrom(f){ return { proyecto:(f.proyecto||'').trim(), area:(f.area||'').trim(), iteracion:(f.iteracion||'').trim(), tag:(f.tag||'').trim(), padre:String(f.padre||'').replace(/^#/,'').trim() }; }
 function azCfgProblem(c){
   if(!c.area && !c.iteracion && !c.tag && !c.padre) return 'Indica al menos un dato para identificar los bugs: área, iteración, etiqueta o padre.';
@@ -2530,7 +2623,7 @@ function azSummary(doc){
   return `<div class="daytiles">${t('Bugs vinculados', bugs.length)}${t('Abiertos', open.length)}${t('Cerrados / resueltos', bugs.length - open.length)}${t('Abiertos críticos / altos', sev.critica + ' / ' + sev.alta)}${t('Abiertos medios / bajos', sev.media + ' / ' + sev.baja)}</div>`;
 }
 function azBugTable(doc, pid){
-  const now = new Date(), base = doc.webBase || '', all = doc.bugs || [];
+  const now = new Date(), all = doc.bugs || [], multiPj = !!(doc.webBases && Object.keys(doc.webBases).length > 1);
   const f = azFilt[pid] || {g:'todos', est:'', pri:''};
   const groups = [['todos','Todos'],['abiertos','Abiertos'],['cerrados','Cerrados'],['qa','En pruebas QA'],['ambiente','Ambiente']];
   const chips = groups.map(([k,l]) => `<button class="chipbtn ${f.g===k?'active':''}" data-act="az-fg" data-v="${k}" type="button">${l} (${all.filter(b => bugInGroup(b,k)).length})</button>`).join('');
@@ -2541,9 +2634,9 @@ function azBugTable(doc, pid){
     .map(b => ({b, ev: evalBug(b, ansCfg, now), pr: bugPriority(b), cl: isClosedState(b.e)}))
     .sort((x,y) => (x.cl - y.cl) || (x.pr.n - y.pr.n) || String(y.b.c||'').localeCompare(String(x.b.c||'')));
   const rows = list.map(({b, ev, pr}) =>
-    `<tr><td class="mono" data-label="Bug">${base ? `<a class="az-link" href="${escapeHtml(base + b.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.id)}</a>` : escapeHtml(b.id)}</td><td data-label="Título" style="min-width:180px">${escapeHtml(b.t)}</td><td data-label="Prioridad"><span class="prio p${pr.n}${pr.auto?' auto':''}" title="${pr.auto ? 'Azure no trae prioridad: se asignó según la severidad (' + SEV_LABEL[ev.sev] + ')' : 'Prioridad que trae Azure'}">${PRIO_LABEL[pr.n]}${pr.auto ? ' · auto' : ''}</span></td><td data-label="Severidad">${SEV_LABEL[ev.sev]}</td><td data-label="Estado">${escapeHtml(b.e)}</td><td data-label="Creado">${b.c ? fmtDate(b.c) : '—'}</td><td data-label="Padre (HU)" style="min-width:120px">${escapeHtml(String(b.p||'').slice(0,60))}</td></tr>`).join('');
+    `<tr><td class="mono" data-label="Bug">${azBugUrl(doc, b) ? `<a class="az-link" href="${escapeHtml(azBugUrl(doc, b))}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.id)}</a>` : escapeHtml(b.id)}</td>${multiPj ? `<td data-label="Proyecto Azure">${escapeHtml(b.pj || '')}</td>` : ''}<td data-label="Título" style="min-width:180px">${escapeHtml(b.t)}</td><td data-label="Prioridad"><span class="prio p${pr.n}${pr.auto?' auto':''}" title="${pr.auto ? 'Azure no trae prioridad: se asignó según la severidad (' + SEV_LABEL[ev.sev] + ')' : 'Prioridad que trae Azure'}">${PRIO_LABEL[pr.n]}${pr.auto ? ' · auto' : ''}</span></td><td data-label="Severidad">${SEV_LABEL[ev.sev]}</td><td data-label="Estado">${escapeHtml(b.e)}</td><td data-label="Creado">${b.c ? fmtDate(b.c) : '—'}</td><td data-label="Padre (HU)" style="min-width:120px">${escapeHtml(String(b.p||'').slice(0,60))}</td></tr>`).join('');
   const empty = rows ? '' : '<p class="small" style="padding:10px;">Ningún bug cumple los filtros elegidos.</p>';
-  return `<div class="chipbar">${chips}</div><div class="azfilters">${selE}${selP}<span class="small">${list.length} de ${all.length} · abiertos primero, por prioridad. «En pruebas QA» y «Ambiente» se detectan por el estado, la etiqueta o el título.</span></div><div class="scroll-y"><table class="stack"><thead><tr><th>Bug</th><th>Título</th><th>Prioridad</th><th>Severidad</th><th>Estado</th><th>Creado</th><th>Padre (HU)</th></tr></thead><tbody>${rows}</tbody></table>${empty}</div>`;
+  return `<div class="chipbar">${chips}</div><div class="azfilters">${selE}${selP}<span class="small">${list.length} de ${all.length} · abiertos primero, por prioridad. «En pruebas QA» y «Ambiente» se detectan por el estado, la etiqueta o el título.</span></div><div class="scroll-y"><table class="stack"><thead><tr><th>Bug</th>${multiPj ? '<th>Proyecto Azure</th>' : ''}<th>Título</th><th>Prioridad</th><th>Severidad</th><th>Estado</th><th>Creado</th><th>Padre (HU)</th></tr></thead><tbody>${rows}</tbody></table>${empty}</div>`;
 }
 /* ================= % de QA certificado ================= */
 function pruLiveHtml(c){
@@ -2625,26 +2718,37 @@ function pruebasPanel(p){
 function azurePanel(p){
   if(!azNS || isClosed(p)) return '';
   const busy = azBusy.has(p.id), doc = azDoc(p), msg = azMsg[p.id] || '';
-  const f = azForm && azForm.pid===p.id ? azForm : (p.azureCfg ? null : azNew(p));
+  const f = azForm && azForm.pid===p.id ? azForm : (p.azureCfg ? null : azNew(p, 0));
   const head = (hint) => `<div class="panel-head"><div><h2>Azure DevOps · Bugs</h2><p class="hint">${hint}</p></div></div>`;
+  const qs = azQueries(p), multi = qs.length > 1;
   if(f){
     const fld = (k, label, ph) => `<div><label class="field-label">${label}</label><input type="text" data-f="azl" data-k="${k}" value="${escapeHtml(f[k])}" placeholder="${escapeHtml(ph)}" autocomplete="off" /></div>`;
     const pv = f.preview ? `<div class="banner ${f.preview.total ? 'banner-info' : 'banner-warn'}" style="margin-top:12px;"><span>${f.preview.total ? '✅' : '⚠️'}</span><span><strong>${f.preview.total} bug(s)</strong> encontrados en «${escapeHtml(f.preview.proyecto)}»${f.preview.truncated ? ' (se traerán los primeros 1500)' : ''}.${f.preview.sample.length ? ' Ejemplos: ' + f.preview.sample.map(b => `<span class="mono">${escapeHtml(b.id)}</span> ${escapeHtml(b.t)}`).join(' · ') : ' Revisa los datos: ninguna combinación coincidió.'}</span></div>` : '';
-    return `<div class="panel">${head('Vincula este proyecto con sus bugs en Azure DevOps. Combina los datos que tengas: se traen los bugs que cumplan <strong>todos</strong> los que llenes. Solo lectura: Azure no se modifica.')}
+    const nq = f.idx===-1 ? qs.length + 1 : f.idx + 1, titQ = f.idx===-1 ? 'Nueva consulta (' + nq + ')' : multi || f.idx>0 ? 'Consulta ' + nq : '';
+    return `<div class="panel">${head((titQ ? '<strong>' + titQ + '.</strong> ' : '') + 'Vincula este proyecto con sus bugs en Azure DevOps. Combina los datos que tengas: se traen los bugs que cumplan <strong>todos</strong> los que llenes. Solo lectura: Azure no se modifica.' + (f.idx!==0 ? ' Si estos bugs viven en <strong>otro proyecto de Azure</strong> (por ejemplo Banca y App), escribe aquí ese proyecto: se suman a los de las otras consultas.' : ''))}
       <div class="rowgrid">${fld('proyecto','Proyecto de Azure (opcional)', (azInfo && azInfo.project) || 'Nombre del proyecto en Azure')}${fld('area','Área / ruta','Ej.: Crédito\\Web')}${fld('iteracion','Iteración (sprint)','Ej.: Sprint 5')}${fld('tag','Etiqueta (tag)','Ej.: cert-credito')}${fld('padre','ID del padre (Epic, Feature o HU)','Ej.: 12345')}</div>
       ${f.error ? `<div class="banner banner-warn" style="margin-top:12px;"><span>⚠️</span><span>${escapeHtml(f.error)}</span></div>` : ''}${pv}
-      <div class="flexend"><button class="btn btn-ghost" data-act="az-test" type="button" ${f.busy?'disabled':''}>${f.busy==='test' ? 'Consultando…' : 'Probar consulta'}</button>${p.azureCfg ? '<button class="btn btn-ghost" data-act="az-cancel" type="button">Cancelar</button>' : ''}<button class="btn btn-primary" data-act="az-save" type="button" ${f.busy?'disabled':''}>${f.busy==='save' ? 'Guardando…' : 'Guardar vínculo y traer bugs'}</button></div></div>`;
+      <div class="flexend"><button class="btn btn-ghost" data-act="az-test" type="button" ${f.busy?'disabled':''}>${f.busy==='test' ? 'Consultando…' : 'Probar consulta'}</button>${p.azureCfg ? '<button class="btn btn-ghost" data-act="az-cancel" type="button">Cancelar</button>' : ''}<button class="btn btn-primary" data-act="az-save" type="button" ${f.busy?'disabled':''}>${f.busy==='save' ? 'Guardando…' : f.idx===-1 ? 'Agregar consulta y traer bugs' : 'Guardar vínculo y traer bugs'}</button></div></div>`;
   }
   const err = doc && doc.error ? `<div class="banner banner-warn" style="margin-bottom:12px;"><span>⚠️</span><span>No se pudo actualizar${doc.errorAt ? ' (' + fmtDateTime(doc.errorAt) + ')' : ''}: ${escapeHtml(doc.error)}${doc.syncedAt ? ' Se muestran los datos de la última sincronización buena.' : ''}</span></div>` : '';
   const err2 = msg ? `<div class="banner banner-warn" style="margin-bottom:12px;"><span>⚠️</span><span>${escapeHtml(msg)}</span></div>` : '';
   const when = doc && doc.syncedAt ? `Última sincronización: <strong>${fmtDateTime(doc.syncedAt)}</strong> (${azAgo(doc.syncedAt)})${azInfo && azInfo.syncMinutes ? ' · se actualiza sola cada ' + azInfo.syncMinutes + ' min' : ''}` : (busy ? 'Consultando Azure DevOps…' : 'Aún no se ha sincronizado.');
   return `<div class="panel">${head('Bugs de este proyecto traídos en vivo desde Azure DevOps (solo lectura).')}
-    <div style="margin-bottom:8px;">${azCfgLine(p.azureCfg)}</div>
+    ${azQueriesHtml(p, qs, multi, doc)}
     <p class="small" style="margin:0 0 12px;">${when}</p>${err}${err2}
     ${doc && doc.syncedAt ? azSummary(doc) + (doc.truncated ? '<p class="small">Hay más de 1500 bugs con este vínculo: se muestran los primeros 1500. Acota con iteración o etiqueta.</p>' : '') : ''}
     ${doc && (doc.bugs||[]).length ? `<details class="crit" data-key="azbugs" ${openDetails.has('azbugs')?'open':''}><summary>Bugs de Azure (${doc.bugs.length})</summary>${azBugTable(doc, p.id)}</details>` : ''}
-    <div class="flexend"><button class="btn btn-sm" data-act="az-sync" type="button" ${busy?'disabled':''}>${busy ? 'Sincronizando…' : '↻ Sincronizar ahora'}</button><button class="btn btn-sm btn-ghost" data-act="az-edit" type="button">Editar vínculo</button><button class="btn btn-sm btn-ghost" data-act="az-unlink" type="button">Quitar vínculo</button></div></div>`;
+    <div class="flexend"><button class="btn btn-sm" data-act="az-sync" type="button" ${busy?'disabled':''}>${busy ? 'Sincronizando…' : '↻ Sincronizar ahora'}</button>${qs.length < 1 + AZ_MAX_EXTRA ? '<button class="btn btn-sm" data-act="az-add" type="button">＋ Agregar otra consulta</button>' : ''}${multi ? '' : '<button class="btn btn-sm btn-ghost" data-act="az-edit" data-i="0" type="button">Editar vínculo</button><button class="btn btn-sm btn-ghost" data-act="az-unlink" data-i="0" type="button">Quitar vínculo</button>'}</div></div>`;
 }
+/* Una línea por consulta (con editar / quitar cuando hay más de una) y el total que trajo cada una. */
+function azQueriesHtml(p, qs, multi, doc){
+  if(!multi) return `<div style="margin-bottom:8px;">${azCfgLine(p.azureCfg)}</div>`;
+  const cons = doc && Array.isArray(doc.consultas) ? doc.consultas : [];
+  return `<div style="margin-bottom:8px;">${qs.map((c, i) => { const r = cons[i];
+    return `<div class="az-query" data-q="${i}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px;"><strong class="small">Consulta ${i+1}</strong>${azCfgLine(c)}${r ? `<span class="small">· ${r.total} bug(s)${r.nuevos!==r.total ? ' (' + r.nuevos + ' nuevos, el resto ya estaban en otra consulta)' : ''}</span>` : ''}
+      <button class="btn btn-sm btn-ghost" data-act="az-edit" data-i="${i}" type="button">Editar</button><button class="btn btn-sm btn-ghost" data-act="az-unlink" data-i="${i}" type="button">Quitar</button></div>`; }).join('')}</div>`;
+}
+function azBugUrl(doc, b){ const bb = (b.pj && doc.webBases && doc.webBases[b.pj]) || doc.webBase || ''; return bb ? bb + b.id : ''; }
 function azCertBox(p){
   const doc = azDoc(p); if(!azNS || !doc || !(doc.bugs||[]).length) return '';
   return `<div class="banner banner-info" style="margin-bottom:12px;"><span>🔗</span><span>Azure DevOps tiene <strong>${doc.bugs.length} bug(s)</strong> vinculados a este proyecto (sincronizado ${azAgo(doc.syncedAt)}). <button class="btn btn-sm btn-primary" data-act="cert-use-azure" type="button" style="margin-left:6px;">Usar bugs de Azure (${doc.bugs.length})</button></span></div>`;
@@ -3127,6 +3231,13 @@ function viewAzure(){
 }
 
 /* ================= BITÁCORA DIARIA ================= */
+/* Enlace de un bug de la bitácora: el que escribió el analista o, si no, el de Azure del proyecto donde se detectó (si está sincronizado). */
+function bugSafeUrl(u){ u = String(u||'').trim(); return /^https?:\/\/\S+$/i.test(u) ? u : ''; }
+function bugLinkOf(b){
+  const u = bugSafeUrl(b.u); if(u) return u;
+  const p = b.pid ? projects.find(x => x.id===b.pid) : null, d = p && typeof azDoc==='function' ? azDoc(p) : null;
+  const bb = d && d.webBase || ''; return bb && /^\d+$/.test(String(b.id)) ? bb + b.id : '';
+}
 function bugTitleFor(id){
   for(const p of projects){ const b = (p.bugs||[]).find(x => String(x.id)===String(id)); if(b) return b.t; }
   return '';
@@ -3155,12 +3266,16 @@ function calendarHtml(a){
     <div class="cal">${cells}</div>
     <div class="legend">${ESTADOS.filter(e=>e.k!=='libre').map(e => `<span><i class="${e.cls}"></i>${e.label}</span>`).join('')}</div>`;
 }
+function bugProjectOptions(){
+  const a = analistas.find(x => x.id===bit.analystId), mine = a ? analystProjects(a) : [], seen = new Set();
+  return mine.concat(projects).filter(p => p && p.name && !seen.has(p.id) && seen.add(p.id)).map(p => `<option value="${escapeHtml(p.name)}"></option>`).join('');
+}
 function slotRows(day){
   return slotsOf(day).map(sl => {
     const x = day.slots[sl.k];
-    const chips = (x.bugs||[]).map((b,bi) => `<span class="chip" title="${escapeHtml(bugTitleFor(b.id) || b.n || '')}"><span class="mono">#${escapeHtml(b.id)}</span> · ${Number(b.min)||0} min${b.n ? ' · ' + escapeHtml(b.n) : ''}<button type="button" data-act="bit-bug-del" data-s="${sl.k}" data-bi="${bi}" aria-label="Quitar bug">×</button></span>`).join('');
+    const chips = (x.bugs||[]).map((b,bi) => { const lk = bugLinkOf(b); return `<span class="chip" title="${escapeHtml(bugTitleFor(b.id) || b.n || '')}"><span class="mono">${lk ? `<a href="${escapeHtml(lk)}" target="_blank" rel="noopener" title="Abrir el bug en Azure DevOps">#${escapeHtml(b.id)} ↗</a>` : '#' + escapeHtml(b.id)}</span> · ${Number(b.min)||0} min${b.pn ? ' · ' + escapeHtml(b.pn) : ''}${b.n ? ' · ' + escapeHtml(b.n) : ''}<button type="button" data-act="bit-bug-del" data-s="${sl.k}" data-bi="${bi}" aria-label="Quitar bug">×</button></span>`; }).join('');
     const form = bit.bugForm===sl.k
-      ? `<div class="bugform"><input type="text" id="bugId" placeholder="# Bug" aria-label="Número de bug" /><input type="number" id="bugMin" min="1" step="1" value="15" aria-label="Minutos" /><input type="text" id="bugNote" placeholder="Nota (opcional) · ej. reportando el bug" aria-label="Nota" /><button class="btn btn-sm btn-primary" type="button" data-act="bit-bug-add" data-s="${sl.k}">Agregar</button><button class="btn btn-sm btn-ghost" type="button" data-act="bit-bug-close">Cancelar</button></div>`
+      ? `<div class="bugform"><input type="text" id="bugId" placeholder="# Bug" aria-label="Número de bug" /><input type="number" id="bugMin" min="1" step="1" value="15" aria-label="Minutos" /><input type="text" id="bugPj" list="bugPjList" placeholder="Proyecto donde lo detectaste" aria-label="Proyecto donde se detectó el bug" /><datalist id="bugPjList">${bugProjectOptions()}</datalist><input type="url" id="bugUrl" placeholder="Enlace del bug en Azure (opcional)" aria-label="Enlace del bug" /><input type="text" id="bugNote" placeholder="Nota (opcional) · ej. reportando el bug" aria-label="Nota" /><button class="btn btn-sm btn-primary" type="button" data-act="bit-bug-add" data-s="${sl.k}">Agregar</button><button class="btn btn-sm btn-ghost" type="button" data-act="bit-bug-close">Cancelar</button></div>`
       : `<button class="btn btn-sm btn-ghost" type="button" data-act="bit-bug-open" data-s="${sl.k}">+ Bug</button>`;
     return `<tr class="st-${x.e}" data-slot="${sl.k}">
       <td class="mono" style="white-space:nowrap;" data-label="Hora">${sl.label}</td>
@@ -3730,7 +3845,7 @@ async function reqUpload(file){
    analista: sus proyectos, edita todo menos crear/borrar proyectos · po: % de entrega y de QA, comenta y reporta ambientes
    ambientes: solo la pestaña Ambientes (marca si fallan o no, ocasional o intermitente; histórico).
    Sin servidor (artifact) no hay sesión: se comporta como administrador. */
-const ROLE_LABELS = {admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO', ambientes:'Ambientes'};
+const ROLE_LABELS = {admin:'Administrador', pmo:'PMO', pmo_lider:'PMO líder', analista:'Analista QA', po:'PO', ambientes:'Ambientes', ambientes_dev:'Ambientes DEV'};
 let comentarios = [], roster = null, asigForm = null;
 const pcomDraft = {};
 function ME(){ return (window.__me && window.__me.user) || null; }
@@ -3743,37 +3858,37 @@ const TABS_ALL = [['tablero','Tablero'],['proyectos','Proyectos'],['cerrados','C
 function tabsForRole(){
   const r = ROLE();
   if(r==='po') return [['po','Mis proyectos'],['ambientes','Ambientes']];
-  if(r==='ambientes') return [['ambientes','Ambientes']];
+  if(r==='ambientes' || r==='ambientes_dev') return [['ambientes','Ambientes']];
   const hide = ({pmo:['nuevo'], pmo_lider:['nuevo','azure','bitacora'], analista:['nuevo','azure']})[r] || [];
   return TABS_ALL.filter(t => hide.indexOf(t[0])<0 && (t[0]!=='cargue' || (r==='admin' && !!cargueNS)));
 }
 function tabAllowed(id){ return tabsForRole().some(t => t[0]===id); }
-function defaultView(){ const r = ROLE(); return r==='po' ? 'po' : r==='ambientes' ? 'ambientes' : 'tablero'; }
+function defaultView(){ const r = ROLE(); return r==='po' ? 'po' : (r==='ambientes' || r==='ambientes_dev') ? 'ambientes' : 'tablero'; }
 
 /* Acciones y campos permitidos a los perfiles de solo lectura */
-const RO_ACTS = new Set(['bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','file-dl','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','pcom-add','pcom-del']);
+const RO_ACTS = new Set(['projq-next','projq-prev','projq-clear','amb-env','bit-open-analyst','bit-team','bit-tview','tab','back','open-project','noop','copy','cert-copy','seg-filter','seg-full','seg-full-close','seg-download','file-dl','report-pdf','az-fg','bit-day','bit-open','bit-shift','bit-today','bit-view','bit-month','bit-analyst','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-notice-close','amb-export','amb-si-ok','amb-si-cancel','pcom-add','pcom-del']);
 /* El perfil Ambientes solo gestiona los ambientes de QA */
-const AMB_ACTS = new Set(['tab','noop','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-rec-done','amb-sent','amb-notice-close','amb-export','amb-retry']);
-const AMB_FIELDS = new Set(['ambQ','ambEst','ambIssue']);
-const RO_FIELDS = new Set(['ambQ','azfEst','azfPri','az','pcom']);
+const AMB_ACTS = new Set(['tab','noop','amb-tab','amb-solo','amb-copy','amb-copy-asunto','amb-copy-to','amb-rec-done','amb-sent','amb-notice-close','amb-export','amb-retry','amb-si-ok','amb-si-cancel']);
+const AMB_FIELDS = new Set(['ambQ','ambEst','ambIssue','ambSiTxt']);
+const RO_FIELDS = new Set(['projQ','ambQ','azfEst','azfPri','az','pcom']);
 const ANALYST_BLOCK = new Set(['create','del-ask','del-yes','del-cancel','bit-add-analyst','asig-save']);
 function roleAllowsAct(act){
   const r = ROLE();
   if(r==='admin') return true;
   if(r==='analista') return !ANALYST_BLOCK.has(act);
-  if(r==='ambientes') return AMB_ACTS.has(act);
+  if(r==='ambientes' || r==='ambientes_dev') return AMB_ACTS.has(act);
   return RO_ACTS.has(act);
 }
 function roleAllowsField(f){
   const r = ROLE();
   if(r==='admin') return true;
   if(r==='analista') return f!=='newAnalyst' && f!=='draftAsig' && f!=='asig';
-  if(r==='ambientes') return AMB_FIELDS.has(f);
-  return RO_FIELDS.has(f) || (r==='po' && f==='ambEst');
+  if(r==='ambientes' || r==='ambientes_dev') return AMB_FIELDS.has(f);
+  return RO_FIELDS.has(f) || (r==='po' && (f==='ambEst' || f==='ambSiTxt'));
 }
 function roleDenied(){
   const r = ROLE();
-  toast(r==='ambientes' ? 'Tu perfil (Ambientes) solo marca el estado de los ambientes y consulta el histórico.' : r==='po' ? 'Tu perfil (PO) solo puede ver el avance, comentar y reportar fallas de ambientes.' : r==='analista' ? 'Esta acción es solo del administrador.' : 'Tu perfil es de solo lectura.');
+  toast(r==='ambientes' || r==='ambientes_dev' ? 'Tu perfil (' + ROLE_LABELS[r] + ') solo marca el estado de los ambientes y consulta el histórico.' : r==='po' ? 'Tu perfil (PO) solo puede ver el avance, comentar y reportar fallas de ambientes.' : r==='analista' ? 'Esta acción es solo del administrador.' : 'Tu perfil es de solo lectura.');
 }
 /* Pasada visual tras cada render: oculta lo que el perfil no puede usar. */
 function applyRoleUI(){
@@ -3789,9 +3904,10 @@ function applyRoleUI(){
   $$('.dropzone, label[for]', app).forEach(el => { if(!canEdit()) el.remove(); });
   $$('input, select, textarea', app).forEach(el => {
     const f = el.dataset && el.dataset.f;
+    if(r==='analista' && el.closest && el.closest('.bugform')) return;   /* el formulario de bugs de la bitácora usa ids, no data-f: el analista sí lo puede llenar */
     if(!f || !roleAllowsField(f)) el.disabled = true;
   });
-  if(r==='po' || r==='ambientes') $$('.chipbtn[data-act="amb-tab"][data-t="config"]', app).forEach(el => el.remove());
+  if(r==='po' || r==='ambientes' || r==='ambientes_dev') $$('.chipbtn[data-act="amb-tab"][data-t="config"]', app).forEach(el => el.remove());
   if(r==='po') $$('.incbody', app).forEach(el => { el.innerHTML = '<div class="small">QA recibe tu reporte y se encarga del Issue en Azure DevOps y del aviso por correo.</div>'; });
 }
 
@@ -4229,6 +4345,26 @@ let ambTestTo = '', ambTestMsg = null;     // prueba de correo (administrador)
 let ambHistSel = new Set(), ambHistDel = null;   // selección para borrar del histórico (solo administrador)
 let ambBusy = false;                     // un cambio de estado en curso
 let ambRowEdit = null, ambRowDel = null; // edición de filas del catálogo (administrador)
+let ambSiForm = null;                    // formulario de descripción al marcar una falla: {h, r, txt}
+let ambDupBusy = false;                  // creando los ambientes DEV
+
+/* ---------- QA / DEV: qué ambientes ve cada perfil y cuál se está mostrando ---------- */
+function ambEnvs(){ const r = ROLE(); return r==='ambientes_dev' ? ['dev'] : r==='admin' ? ['qa','dev'] : ['qa']; }
+function ambApply(){
+  const es = ambEnvs(); if(es.indexOf(ambEnv)<0) ambEnv = es[0];
+  ambHojas = ambHojasAll.filter(h => ambEnvOf(h)===ambEnv);
+  ambHist = ambHistAll.filter(h => ambEnvOf(h)===ambEnv);
+  ambGenerales = ambGeneralesAll.find(g => ambEnvOf(g)===ambEnv) || null;
+  ambCfg = ambCfgs[ambEnv];
+}
+const ambEnvName = () => AMB_ENV_LABEL[ambEnv] || 'QA';
+const ambIssueLink = r => (r && (r.issueUrl || ambIssueUrl(ambCfg, r.issue))) || '';
+/* «#123» como enlace directo al Issue en Azure DevOps (si no hay forma de armar el enlace, solo el número) */
+function ambIssueA(id, url){
+  const n = String(id||'').trim(); if(!n) return '';
+  const u = url || ambIssueUrl(ambCfg, n);
+  return u ? `<a href="${escapeHtml(u)}" target="_blank" rel="noopener" title="Abrir el Issue en Azure DevOps">#${escapeHtml(n)} ↗</a>` : '#' + escapeHtml(n);
+}
 
 function ambNowIso(){ return new Date().toISOString(); }
 function deepMergeJ(a, b){
@@ -4257,7 +4393,7 @@ function ambOpenList(){
 function ambOpenCount(){ let n = 0; ambHojas.forEach(h => Object.keys(h.rows||{}).forEach(k => { if(ambIsSI(h.rows[k].est)) n++; })); return n; }
 function ambIncKey(i){ return i.hojaId + '|' + i.rk; }
 function ambFindInc(k){ return ambOpenList().find(i => ambIncKey(i)===k) || null; }
-function ambMsgData(i){ return { hoja:i.hoja, detalle:i.detalle, issue:(i.rec && i.rec.issue) || '', desc:i.desc, horas:i.horas }; }
+function ambMsgData(i){ return { hoja:i.hoja, detalle:i.detalle, issue:(i.rec && i.rec.issue) || '', issueUrl:(i.rec && i.rec.issueUrl) || '', desc:i.desc, descError:(i.rec && i.rec.descError) || '', amb:ambEnv, horas:i.horas }; }
 
 /* ---------- importación del Excel ---------- */
 async function ambImportFile(file){
@@ -4291,26 +4427,31 @@ async function ambImportFile(file){
 }
 
 /* ---------- cambio de estado (equivale a editar la columna C en Sheets) ---------- */
-async function ambSetEstado(hojaId, rk, nuevo){
-  if(ambNS) return ambSetEstadoSrv(hojaId, rk, nuevo);
-  const h = ambHojas.find(x => x.id===hojaId); if(!h) return;
-  const row = h.rows[rk]; if(!row) return;
+async function ambSetEstado(hojaId, rk, nuevo, descripcion){
+  const h0 = ambHojas.find(x => x.id===hojaId), row0 = h0 && h0.rows[rk];
+  if(row0 && ambTransicion(row0.est, nuevo).abre && !descripcion){   /* una falla nueva pide primero la descripción del error: es la que se escribe en el Issue de Azure */
+    ambSiForm = { h:hojaId, r:rk, txt:'' }; openDetails.add('ambsi'); render();
+    setTimeout(() => { const t = document.getElementById('ambSiTxt'); if(t) t.focus(); }, 0); return;
+  }
+  if(ambNS) return ambSetEstadoSrv(hojaId, rk, nuevo, descripcion);
+  const h = h0; if(!h) return;
+  const row = row0; if(!row) return;
   const old = row.est, t = ambTransicion(old, nuevo);
   if(!t.cambia){ return; }
   const now = ambNowIso(), autor = whoName();
   const patch = { est: nuevo };
   if(t.actualizaFecha){ patch.ult = now; patch.hist = t.valorH; }
   if(t.abre) patch.aviso = now;
-  const base = { hoja:h.name, hojaId:h.id, rowKey:rk, detalle:row.det, desc:row.desc, autor };
+  const base = { hoja:h.name, hojaId:h.id, rowKey:rk, detalle:row.det, desc:row.desc, autor, amb:ambEnv };
   await guarded(async () => {
     if(t.abre){
-      const id = await ambRetry(() => stAdd('amb_hist', Object.assign({}, base, { falla:'SI', fecha:now, issue:'', enviado:false, solventado:'' })));
+      const id = await ambRetry(() => stAdd('amb_hist', Object.assign({}, base, { falla:'SI', fecha:now, issue:'', enviado:false, solventado:'', descError:String(descripcion||'').trim() })));
       openDetails.add('ambinc:' + hojaId + '|' + rk);
-      ambNotice = null; toast('Incidente registrado. Crea el Issue en Azure DevOps y anota su número.');
+      ambNotice = null; ambSiForm = null; toast('Incidente registrado. Crea el Issue en Azure DevOps (con esa descripción) y anota su número.');
     } else if(t.cierra){
       const open = ambHist.filter(r => ambIsSI(r.falla) && !r.cierreEn && r.hojaId===h.id && (r.rowKey ? r.rowKey===rk : r.detalle===row.det)).sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)))[0] || null;
       const issue = (open && open.issue) || '';
-      const nid = await ambRetry(() => stAdd('amb_hist', Object.assign({}, base, { falla:'NO (Solucionado)', fecha:now, issue, solventado:'SI', enviado:false, abre: open ? open.id : '' })));
+      const nid = await ambRetry(() => stAdd('amb_hist', Object.assign({}, base, { falla:'NO (Solucionado)', fecha:now, issue, issueUrl:(open && open.issueUrl) || '', descError:(open && open.descError) || '', solventado:'SI', enviado:false, abre: open ? open.id : '' })));
       if(open) await ambRetry(() => stUpd('amb_hist', open.id, { cierreEn: now, cerradoPor: autor }));
       ambNotice = { id: nid }; toast('Incidente solucionado. Copia el correo de cierre y cierra el Issue.');
     }
@@ -4334,17 +4475,27 @@ function ambResultMsg(r){
   else if(r.correoEstado==='error') w.push('no se pudo enviar el correo');
   return w.length ? m + ' · ⚠ ' + w.join(' y ') + (r.errores && r.errores.length ? ' — ' + r.errores.join(' · ') : '') + ' (puedes reintentar en el incidente o el histórico)' : m;
 }
-async function ambSetEstadoSrv(hojaId, rk, nuevo){
+async function ambSetEstadoSrv(hojaId, rk, nuevo, descripcion){
   if(ambBusy){ toast('Espera un momento: se está procesando otro cambio.'); render(); return; }
   const h = ambHojas.find(x => x.id===hojaId), row = h && h.rows[rk]; if(!row || String(row.est||'')===String(nuevo||'')){ return; }
   ambBusy = true; toast(ambIsSI(nuevo) ? 'Registrando la falla: creando el Issue y enviando el correo…' : 'Guardando…'); render();
   try{
-    const r = await ambNS.marcar(hojaId, rk, nuevo);
-    if(r.accion==='abre'){ openDetails.add('ambinc:' + hojaId + '|' + rk); ambNotice = null; }
+    const r = await ambNS.marcar(hojaId, rk, nuevo, descripcion || '');
+    if(r.accion==='abre'){ openDetails.add('ambinc:' + hojaId + '|' + rk); ambNotice = null; ambSiForm = null; }
     else if(r.accion==='cierra'){ ambNotice = (r.correoEstado==='ok' && r.issueEstado!=='error' && r.issueEstado!=='sin_config') ? null : {id: r.recId}; }
     toast(ambResultMsg(r));
   }catch(e){ console.error(e); toast(e && e.message ? e.message : 'No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.'); }
   ambBusy = false; render();
+}
+/* Confirmar el formulario de descripción */
+async function ambSiOk(){
+  const f = ambSiForm; if(!f) return;
+  const txt = String(f.txt||'').trim();
+  if(txt.length < 5){ toast('Describe el error (cómo se presenta, qué ves o qué mensaje sale): esa descripción es la que se escribe en el Issue de Azure DevOps.'); return; }
+  await ambSetEstado(f.h, f.r, 'SI', txt);
+  if(ambSiForm && !ambBusy && !ambHojas.some(h => h.id===f.h && h.rows[f.r] && ambIsSI(h.rows[f.r].est))) { /* falló: se deja el formulario para reintentar */ }
+  else ambSiForm = null;
+  render();
 }
 async function ambRetryRec(id){
   if(!ambNS || ambBusy) return;
@@ -4358,8 +4509,8 @@ async function ambSetIssue(k, value){
   const inc = ambFindInc(k); if(!inc) return;
   const v = String(value||'').replace(/[^0-9]/g, '').slice(0, 12);
   await guarded(async () => {
-    if(inc.rec){ await ambRetry(() => stUpd('amb_hist', inc.rec.id, { issue: v })); }
-    else { await ambRetry(() => stAdd('amb_hist', { hoja:inc.hoja, hojaId:inc.hojaId, rowKey:inc.rk, detalle:inc.detalle, desc:inc.desc, autor:whoName(), falla:'SI', fecha: inc.inicio || ambNowIso(), issue: v, enviado:false, solventado:'' })); }
+    if(inc.rec){ await ambRetry(() => stUpd('amb_hist', inc.rec.id, { issue: v, issueUrl: '' })); }
+    else { await ambRetry(() => stAdd('amb_hist', { hoja:inc.hoja, hojaId:inc.hojaId, rowKey:inc.rk, detalle:inc.detalle, desc:inc.desc, autor:whoName(), falla:'SI', amb:ambEnv, fecha: inc.inicio || ambNowIso(), issue: v, enviado:false, solventado:'' })); }
   }, v ? 'Issue ' + v + ' guardado' : null);
   render();
 }
@@ -4393,7 +4544,7 @@ function ambMsgFor(w, ref){
   // ref: incidente abierto (clave) o registro del histórico (id)
   if(w==='cierre' || w==='inc-hist'){
     const r = ambHist.find(x => x.id===ref); if(!r) return null;
-    const d = { hoja:r.hoja, detalle:r.detalle, issue:r.issue, desc:r.desc };
+    const d = { hoja:r.hoja, detalle:r.detalle, issue:r.issue, issueUrl:r.issueUrl, desc:r.desc, descError:r.descError, amb:ambEnv };
     return ambMensaje(w==='cierre' ? 'cierre' : 'inc', d, ambCfg);
   }
   const inc = ambFindInc(ref); if(!inc) return null;
@@ -4418,21 +4569,21 @@ function ambCfgSet(path, value){
 }
 async function ambSaveCfg(){
   if(!ambCfgDraft) return;
-  const c = mergeAmb(ambCfgDraft);
+  const c = mergeAmb(ambCfgDraft, ambEnv);
   if(!/\S+@\S+/.test(c.correos)){ toast('Agrega al menos un correo de destino.'); return; }
-  await guarded(() => stSet('config', 'amb', JSON.parse(JSON.stringify(c))), 'Configuración guardada');
-  ambCfg = c; ambCfgDraft = null; render();
+  await guarded(() => stSet('config', ambCfgId(ambEnv), JSON.parse(JSON.stringify(c))), 'Configuración de ' + ambEnvName() + ' guardada');
+  ambCfgs[ambEnv] = c; ambApply(); ambCfgDraft = null; render();
 }
 
 /* ---------- exportar histórico ---------- */
 function ambHistRows(){
   const pairs = ambPair(ambHist).reverse();
-  const head = ['Fecha','Servicio / ambiente','Detalle','Falla','Issue','Estado','Tiempo abierto (h)','Cierre','Registrado por','Correo enviado'];
-  return [head].concat(pairs.map(r => [fmtDateTime(r.fecha), r.hoja, r.detalle, r.falla, r.issue || '', r.estado || '', r.horas!=null ? Math.round(r.horas*10)/10 : '', r.cierre ? fmtDateTime(r.cierre) : '', r.autor || '', r.enviado ? 'Sí' : '']));
+  const head = ['Fecha','Ambiente','Servicio / ambiente','Detalle','Descripción del error','Falla','Issue','Enlace del Issue','Estado','Tiempo abierto (h)','Cierre','Registrado por','Correo enviado'];
+  return [head].concat(pairs.map(r => [fmtDateTime(r.fecha), ambEnvName(), r.hoja, r.detalle, r.descError || '', r.falla, r.issue || '', r.issue ? ambIssueLink(r) : '', r.estado || '', r.horas!=null ? Math.round(r.horas*10)/10 : '', r.cierre ? fmtDateTime(r.cierre) : '', r.autor || '', r.enviado ? 'Sí' : '']));
 }
 async function ambExport(){
   if(!dlNS){ toast('La descarga no está disponible en esta vista.'); return; }
-  const rows = ambHistRows(), base = 'Historico_Ambientes_QA_' + ymd(new Date());
+  const rows = ambHistRows(), base = 'Historico_Ambientes_' + ambEnvName() + '_' + ymd(new Date());
   let f;
   if(window.XLSX && window.XLSX.utils){
     const X = window.XLSX, wb = X.utils.book_new(), ws = X.utils.aoa_to_sheet(rows);
@@ -4530,9 +4681,43 @@ async function ambRowDelete(){
   render();
 }
 
+/* ---------- crear los ambientes DEV a partir de los de QA (administrador) ---------- */
+async function ambDuplicarDev(){
+  if(!isAdmin() || ambDupBusy) return;
+  ambDupBusy = true; render();
+  try{
+    if(ambNS){
+      const r = await ambNS.duplicarDev();
+      toast(r && r.creadas && r.creadas.length ? 'Ambientes DEV creados (' + r.creadas.length + ' hojas).' : 'Los ambientes DEV ya estaban creados.');
+    } else {
+      const qa = ambHojasAll.concat(ambGeneralesAll).filter(h => ambEnvOf(h)==='qa');
+      if(!qa.length){ toast('Todavía no hay ambientes de QA para copiar: carga primero el Excel de Ambientes QA.'); }
+      else {
+        let n = 0;
+        for(const h of qa){
+          const id = 'dev-' + h.id; if(ambHojasAll.some(x => x.id===id) || ambGeneralesAll.some(x => x.id===id)) continue;
+          const d = JSON.parse(JSON.stringify(h)); delete d.total; d.id = id; d.amb = 'dev'; d.name = String(d.name || h.id) + ' DEV';
+          if(d.rows) Object.keys(d.rows).forEach(k => Object.assign(d.rows[k], { est:'NO', hist:'', ult:'', aviso:'' }));
+          await ambRetry(() => stSet('amb_hojas', id, d)); n++;
+        }
+        if(!(local.config && local.config.has('amb_dev'))){
+          const c = JSON.parse(JSON.stringify(ambCfgs.qa)); c.azure.etiqueta = 'Ambiente DEV';
+          await ambRetry(() => stSet('config', 'amb_dev', c));
+        }
+        toast(n ? 'Ambientes DEV creados (' + n + ' hojas).' : 'Los ambientes DEV ya estaban creados.');
+      }
+    }
+  }catch(e){ console.error(e); toast(e && e.message ? e.message : 'No se pudieron crear los ambientes DEV.'); }
+  ambDupBusy = false; render();
+}
+
 /* ---------- eventos ---------- */
 function ambClick(act, el){
   switch(act){
+    case 'amb-env': if(ambEnvs().indexOf(el.dataset.e)>=0){ ambEnv = el.dataset.e; ambTab = null; ambCfgDraft = null; ambHistSel = new Set(); ambHistDel = null; ambRowEdit = null; ambRowDel = null; ambNotice = null; ambSiForm = null; ambFilter = { q:'', solo:'todos' }; ambApply(); render(); window.scrollTo(0, 0); } break;
+    case 'amb-si-ok': ambSiOk(); break;
+    case 'amb-si-cancel': ambSiForm = null; render(); break;
+    case 'amb-dup-dev': ambDuplicarDev(); break;
     case 'amb-tab': ambTab = el.dataset.t; if(ambTab==='config' && !ambCfgDraft) ambCfgDraft = JSON.parse(JSON.stringify(ambCfg)); render(); window.scrollTo(0, 0); break;
     case 'amb-solo': ambFilter.solo = el.dataset.v; render(); break;
     case 'amb-copy': ambCopy(el.dataset.w, el.dataset.k); break;
@@ -4551,7 +4736,7 @@ function ambClick(act, el){
     case 'amb-notice-close': ambNotice = null; render(); break;
     case 'amb-cfg-save': ambSaveCfg(); break;
     case 'amb-cfg-reset': ambCfgDraft = JSON.parse(JSON.stringify(ambCfg)); render(); break;
-    case 'amb-cfg-defaults': ambCfgDraft = ambDefaults(); render(); toast('Valores originales cargados: guarda para aplicarlos.'); break;
+    case 'amb-cfg-defaults': ambCfgDraft = ambDefaults(ambEnv); render(); toast('Valores originales cargados: guarda para aplicarlos.'); break;
     case 'amb-replace': ambReplace = !ambReplace; render(); break;
     case 'amb-export': ambExport(); break;
     case 'amb-hsel': if(isAdmin()) ambHistToggle(el.dataset.k); break;
@@ -4566,6 +4751,7 @@ function ambInput(f, el){
   switch(f){
     case 'ambQ': ambFilter.q = el.value; render(); break;
     case 'ambTestTo': ambTestTo = el.value; break;
+    case 'ambSiTxt': if(ambSiForm) ambSiForm.txt = el.value; break;
     case 'ambRowF': if(ambRowEdit) ambRowEdit.c[Number(el.dataset.i)] = el.value; break;
     case 'ambCfg': ambCfgSet(el.dataset.k, el.dataset.num ? Number(el.value) : el.value); break;
   }
@@ -4595,11 +4781,11 @@ function ambEnvioBlock(rec, recMsg){
   let a;
   if(cierre){
     a = !rec.issue ? line(null, 'No había un Issue asociado a este incidente.')
-      : rec.issueCerrado || (rec.issueEstado==='ok') ? line(true, 'Issue #' + escapeHtml(rec.issue) + ' cerrado en Azure DevOps.')
+      : rec.issueCerrado || (rec.issueEstado==='ok') ? line(true, 'Issue ' + ambIssueA(rec.issue, rec.issueUrl) + ' cerrado en Azure DevOps.')
       : rec.issueEstado==='error' ? line(false, 'No se pudo cerrar el Issue #' + escapeHtml(rec.issue) + ': ' + escapeHtml(rec.issueError || 'error de Azure') + '.')
-      : line(null, 'Cierra el Issue #' + escapeHtml(rec.issue) + ' en Azure DevOps (estado: ' + escapeHtml((ambCfg.azure && ambCfg.azure.estadoCierre) || 'Cerrado') + ').');
+      : line(null, 'Cierra el Issue ' + ambIssueA(rec.issue, rec.issueUrl) + ' en Azure DevOps (estado: ' + escapeHtml((ambCfg.azure && ambCfg.azure.estadoCierre) || 'Cerrado') + ').');
   } else {
-    a = rec.issue ? line(true, 'Issue #' + escapeHtml(rec.issue) + (rec.issueEstado==='ok' ? ' creado en Azure DevOps.' : ' anotado.'))
+    a = rec.issue ? line(true, 'Issue ' + ambIssueA(rec.issue, rec.issueUrl) + (rec.issueEstado==='ok' ? ' creado en Azure DevOps.' : ' anotado.'))
       : rec.issueEstado==='error' ? line(false, 'No se pudo crear el Issue: ' + escapeHtml(rec.issueError || 'error de Azure') + '.')
       : rec.issueEstado==='sin_config' ? line(null, 'Azure no está configurado en el servidor: crea el Issue a mano y anota su número.')
       : line(null, 'Issue pendiente.');
@@ -4629,12 +4815,22 @@ function ambIncidentCard(i){
       <span class="inc-badges"><span class="badge ans-incumple"><span class="dot"></span>Abierto · ${i.horas >= 48 ? Math.floor(i.horas/24) + ' d' : Math.floor(i.horas) + ' h'}</span>${i.vencido ? `<span class="badge badge-parcial"><span class="dot"></span>⏰ Recordatorio pendiente</span>` : ''}${auto && i.rec && (i.rec.issueEstado==='error' || i.rec.correoEstado==='error') ? `<span class="badge badge-parcial"><span class="dot"></span>⚠ Envío pendiente</span>` : ''}<span class="badge ${issue ? 'badge-recibida' : 'badge-pendiente'}"><span class="dot"></span>${issue ? 'Issue #' + escapeHtml(issue) : 'Sin Issue'}</span></span></summary>
     <div class="incbody">
       <div class="small">Detectado ${fmtDateTime(i.inicio)} · responsable: ${escapeHtml(ambAsignado(ambCfg, i.hoja) || '—')} · para cerrarlo, cambia el estado a NO (o intermitente) en la pestaña ${escapeHtml(i.hoja)}.</div>
+      ${i.rec && i.rec.descError ? `<div class="small" style="margin-top:6px;"><b>Descripción del error:</b> ${escapeHtml(i.rec.descError)}</div>` : ''}
+      ${issue ? `<div class="small" style="margin-top:6px;"><b>Issue en Azure DevOps:</b> ${ambIssueA(issue, i.rec && i.rec.issueUrl)}</div>` : ''}
       ${auto ? ambEnvioBlock(i.rec) + recInfo : ''}
       <div class="rowgrid" style="margin-top:10px;"><div><label class="field-label" for="iss-${escapeHtml(k)}">N.º del Issue en Azure DevOps</label>
         <input type="text" inputmode="numeric" id="iss-${escapeHtml(k)}" data-f="ambIssue" data-k="${escapeHtml(k)}" value="${escapeHtml(issue)}" placeholder="Ej. 70628" style="max-width:200px;" />
         <div class="small" style="margin-top:4px;">${auto ? 'Se llena solo al crear el Issue; corrígelo aquí si hace falta.' : 'Créalo con los datos de abajo y anota aquí su número: se incluye en el correo y en el cierre.'}</div></div></div>
       ${auto ? `<details style="margin-top:10px;" data-key="${escapeHtml(mkey)}" ${openDetails.has(mkey) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Hacerlo a mano (copiar datos y correo)</summary>${manual}</details>` : manual}
     </div></details>`;
+}
+/* Formulario de la descripción del error: obligatoria; es el texto que se escribe en el Issue de Azure DevOps */
+function ambSiPanel(){
+  const f = ambSiForm; if(!f) return '';
+  const h = ambHojas.find(x => x.id===f.h), row = h && h.rows[f.r]; if(!row){ return ''; }
+  return `<div class="panel noticebox" style="border-color:var(--critical);"><div class="panel-head"><div><h2>⚠ Describe el error · ${escapeHtml(h.name)}</h2><p class="hint">${escapeHtml(row.det)}. Escribe cómo se presenta (qué ves, qué mensaje sale, desde cuándo). Es obligatorio: esta descripción es la que se escribe en el Issue de Azure DevOps y va en el correo.</p></div></div>
+    <textarea id="ambSiTxt" data-f="ambSiTxt" rows="4" maxlength="4000" placeholder="Ej.: Al consultar el saldo responde error 500 «Servicio no disponible»; pasa desde las 8:15 a. m." aria-label="Descripción del error" style="width:100%;">${escapeHtml(f.txt)}</textarea>
+    <div class="flexrow" style="margin-top:8px;"><button class="btn btn-sm btn-primary" data-act="amb-si-ok" type="button" ${ambBusy ? 'disabled' : ''}>Registrar falla</button><button class="btn btn-sm btn-ghost" data-act="amb-si-cancel" type="button">Cancelar</button></div></div>`;
 }
 function ambIncidentsPanel(incs){
   if(!incs.length) return '';
@@ -4644,18 +4840,31 @@ function ambIncidentsPanel(incs){
 function ambNoticePanel(){
   if(!ambNotice) return '';
   const r = ambHist.find(x => x.id===ambNotice.id); if(!r){ return ''; }
-  const m = ambMensaje('cierre', { hoja:r.hoja, detalle:r.detalle, issue:r.issue, desc:r.desc }, ambCfg);
-  return `<div class="panel noticebox"><div class="panel-head"><div><h2>✅ Incidente solucionado</h2><p class="hint">${escapeHtml(r.hoja)} · ${escapeHtml(r.detalle)}. ${r.issue ? 'Cierra el Issue #' + escapeHtml(r.issue) + ' en Azure DevOps (estado: Cerrado) y envía este correo.' : 'No había un Issue anotado para este incidente; envía este correo de cierre.'}</p></div>
+  const m = ambMensaje('cierre', { hoja:r.hoja, detalle:r.detalle, issue:r.issue, issueUrl:r.issueUrl, desc:r.desc, descError:r.descError, amb:ambEnv }, ambCfg);
+  return `<div class="panel noticebox"><div class="panel-head"><div><h2>✅ Incidente solucionado · ${ambEnvName()}</h2><p class="hint">${escapeHtml(r.hoja)} · ${escapeHtml(r.detalle)}. ${r.issue ? 'Cierra el Issue ' + ambIssueA(r.issue, r.issueUrl) + ' en Azure DevOps (estado: Cerrado) y envía este correo.' : 'No había un Issue anotado para este incidente; envía este correo de cierre.'}</p></div>
     <button class="btn btn-sm btn-ghost" data-act="amb-notice-close" type="button">Cerrar aviso</button></div>${ambNS ? ambEnvioBlock(r) : ''}${ambMsgBlock(m)}
     <div class="flexrow"><button class="btn btn-sm btn-primary" data-act="amb-copy" data-w="cierre" data-k="${escapeHtml(r.id)}" type="button">Copiar correo de cierre</button><button class="btn btn-sm" data-act="amb-copy-asunto" data-w="cierre" data-k="${escapeHtml(r.id)}" type="button">Copiar asunto</button><button class="btn btn-sm" data-act="amb-copy-to" type="button">Copiar destinatarios</button></div></div>`;
 }
 function ambEmpty(){
+  const E = ambEnvName();
+  if(ambEnv==='dev'){
+    if(!isAdmin()) return `<div class="panel">${ambEnvTabs()}<div class="panel-head"><div><h2>Ambientes DEV</h2><p class="hint">Todavía no hay ambientes DEV. Pídele al administrador que los cree.</p></div></div></div>`;
+    return `<div class="panel">${ambEnvTabs()}<div class="panel-head"><div><h2>Ambientes DEV</h2><p class="hint">Seguimiento del estado de los ambientes de DEV, con el mismo formato que los de QA.</p></div></div>
+      <div class="empty" style="text-align:left;"><p style="margin:0 0 10px;">Crea los ambientes DEV copiando los de QA: cada hoja se llama igual con «DEV» al final (p. ej. «Servicios DEV»), todas las filas quedan en NO y el histórico empieza vacío. La configuración (correos, responsables, Azure) también se copia y puedes ajustarla en la pestaña ⚙ Configuración.</p>
+      <button class="btn btn-primary" data-act="amb-dup-dev" type="button" ${ambDupBusy ? 'disabled' : ''}>${ambDupBusy ? 'Creando…' : '➕ Crear ambientes DEV desde QA'}</button></div></div>`;
+  }
   if(!isAdmin()) return `<div class="panel"><div class="panel-head"><div><h2>Ambientes QA</h2><p class="hint">Todavía no hay ambientes cargados. Pídele al administrador que los cargue.</p></div></div></div>`;
-  return `<div class="panel"><div class="panel-head"><div><h2>Ambientes QA</h2><p class="hint">Seguimiento del estado de los ambientes de QA: servicios, banca, app, proveedores y servidores.</p></div></div>
+  return `<div class="panel">${ambEnvTabs()}<div class="panel-head"><div><h2>Ambientes QA</h2><p class="hint">Seguimiento del estado de los ambientes de QA: servicios, banca, app, proveedores y servidores.</p></div></div>
     ${ambProg ? ambProgHtml() : `<div class="empty" style="text-align:left;">
       <p style="margin:0 0 10px;">Carga el Excel de <b>Ambientes QA</b>. Se crea una pestaña por cada hoja (Servicios, Banca, Sitio Público, App, Agil, Proveedores, Banca Empresas y Servidores), más el Histórico de incidentes y el catálogo de fallas generales.</p>
       <label class="btn btn-primary" for="ambFileInput" style="cursor:pointer;">📥 Cargar Excel de Ambientes QA</label><input type="file" id="ambFileInput" accept=".xlsx,.xlsm,.xlsb,.xls" hidden />
       ${ambImportMsg ? `<div class="small" style="margin-top:10px;color:var(--critical);">${escapeHtml(ambImportMsg)}</div>` : ''}</div>`}</div>`;
+}
+/* Pestañas QA / DEV (solo cuando el perfil ve más de un ambiente: el administrador) */
+function ambEnvTabs(){
+  const es = ambEnvs(); if(es.length < 2) return '';
+  const nOpen = e => ambHojasAll.filter(h => ambEnvOf(h)===e).reduce((n, h) => n + Object.keys(h.rows||{}).filter(k => ambIsSI(h.rows[k].est)).length, 0);
+  return `<div class="chipbar" style="margin-bottom:10px;" role="tablist" aria-label="Tipo de ambiente">${es.map(e => `<button class="chipbtn ${ambEnv===e?'active':''}" data-act="amb-env" data-e="${e}" type="button" role="tab" aria-selected="${ambEnv===e}">Ambientes ${AMB_ENV_LABEL[e]}${nOpen(e) ? ' · ' + nOpen(e) + ' ⚠' : ''}</button>`).join('')}</div>`;
 }
 function ambProgHtml(){
   const p = ambProg, pct = p.total ? Math.round(p.done / p.total * 100) : 0;
@@ -4729,31 +4938,31 @@ function ambHistView(){
   const pairs = ambPair(ambHist).reverse(), st = ambStats(pairs, ambNowIso());
   const adm = isAdmin() && !!ambNS, nCols = adm ? 9 : 8;
   const rows = pairs.slice(0, 300).map(r => {
-    const msgT = r.mensaje && r.imp ? r.mensaje : (ambIsSI(r.falla) ? ambMensaje('inc', r, ambCfg).text : ambMensaje('cierre', r, ambCfg).text);
+    const rm = Object.assign({}, r, { amb: ambEnv }), msgT = r.mensaje && r.imp ? r.mensaje : (ambIsSI(r.falla) ? ambMensaje('inc', rm, ambCfg).text : ambMensaje('cierre', rm, ambCfg).text);
     const key = 'ambmsg:' + (r.id||'');
     const chk = adm ? `<td><input type="checkbox" data-act="amb-hsel" data-k="${escapeHtml(r.id||'')}" ${ambHistSel.has(r.id) ? 'checked' : ''} ${r.estado==='Abierto' || ambBusy ? 'disabled' : ''} aria-label="Seleccionar para borrar" /></td>` : '';
-    return `<tr>${chk}<td class="small" style="white-space:nowrap;">${fmtDateTime(r.fecha)}</td><td>${escapeHtml(r.hoja)}</td><td><div class="cellx" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div></td>
-      <td><span class="badge ${ambIsSI(r.falla) ? 'ans-incumple' : 'badge-recibida'}">${escapeHtml(r.falla)}</span></td><td>${r.issue ? '#' + escapeHtml(r.issue) : '—'}</td>
+    return `<tr>${chk}<td class="small" style="white-space:nowrap;">${fmtDateTime(r.fecha)}</td><td>${escapeHtml(r.hoja)}</td><td><div class="cellx" title="${escapeHtml(r.detalle)}">${escapeHtml(r.detalle)}</div>${r.descError ? `<div class="small" style="max-width:320px;white-space:normal;"><b>Descripción:</b> ${escapeHtml(r.descError)}</div>` : ''}</td>
+      <td><span class="badge ${ambIsSI(r.falla) ? 'ans-incumple' : 'badge-recibida'}">${escapeHtml(r.falla)}</span></td><td>${r.issue ? ambIssueA(r.issue, r.issueUrl) : '—'}</td>
       <td><span class="badge ${r.estado==='Abierto' ? 'ans-incumple' : r.estado==='Solucionado' ? 'badge-recibida' : 'badge-pendiente'}">${escapeHtml(r.estado||'')}</span></td>
       <td class="small">${r.horas!=null ? (r.horas >= 48 ? Math.round(r.horas/24*10)/10 + ' d' : Math.round(r.horas*10)/10 + ' h') : '—'}</td>
       <td>${ambHistEnvio(r)}<details data-key="${escapeHtml(key)}" ${openDetails.has(key) ? 'open' : ''}><summary class="small" style="cursor:pointer;">Ver correo</summary><pre class="msgpre" style="min-width:280px;">${escapeHtml(msgT)}</pre></details></td></tr>`;
   }).join('');
-  return `<div class="panel"><div class="panel-head"><div><h2>Histórico de incidentes</h2><p class="hint">${st.total} incidentes · ${st.solucionados} solucionados · ${st.abiertos} abiertos${st.promHoras!=null ? ' · tiempo promedio de resolución ' + (st.promHoras >= 48 ? Math.round(st.promHoras/24*10)/10 + ' días' : Math.round(st.promHoras*10)/10 + ' h') : ''}</p></div>
+  return `<div class="panel"><div class="panel-head"><div><h2>Histórico de incidentes · ${ambEnvName()}</h2><p class="hint">${st.total} incidentes · ${st.solucionados} solucionados · ${st.abiertos} abiertos${st.promHoras!=null ? ' · tiempo promedio de resolución ' + (st.promHoras >= 48 ? Math.round(st.promHoras/24*10)/10 + ' días' : Math.round(st.promHoras*10)/10 + ' h') : ''}</p></div>
     <button class="btn btn-sm" data-act="amb-export" type="button">⬇ Histórico (Excel)</button></div>${adm ? ambHistAdminBar() : ''}
     <div class="tablewrap"><table class="ambtbl"><thead><tr>${adm ? '<th></th>' : ''}<th>Fecha</th><th>Servicio</th><th>Detalle</th><th>Falla</th><th>Issue</th><th>Estado</th><th>Tiempo abierto</th><th>Correo</th></tr></thead><tbody>${rows || `<tr><td colspan="${nCols}" class="small" style="padding:14px;">Aún no hay incidentes registrados.</td></tr>`}</tbody></table></div>${pairs.length > 300 ? `<div class="small" style="margin-top:8px;">Se muestran los 300 más recientes; el Excel descarga todos.</div>` : ''}</div>`;
 }
 function ambGeneralesView(){
   const g = ambGenerales; if(!g) return '';
-  return `<div class="panel"><div class="panel-head"><div><h2>Errores y fallas comunes</h2><p class="hint">Catálogo de fallas frecuentes del ambiente QA y dónde se visualizan.</p></div></div>
+  return `<div class="panel"><div class="panel-head"><div><h2>Errores y fallas comunes</h2><p class="hint">Catálogo de fallas frecuentes del ambiente ${ambEnvName()} y dónde se visualizan.</p></div></div>
     <div class="tablewrap"><table class="ambtbl"><thead><tr>${g.headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${(g.filas||[]).map(r => `<tr>${g.headers.map((_,i) => `<td>${escapeHtml(r[i]||'')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
-    <div class="small" style="margin-top:10px;"><b>Tipos de falla:</b> SI = está fallando ahora (abre incidente, Issue y correo) · NO = funciona bien (si venía de SI, cierra el incidente) · OCASIONALMENTE = bien, pero falla ~1 vez al mes · MUY INTERMITENTE = bien, pero con mucha intermitencia (p. ej. 5 veces al mes).</div></div>`;
+    <div class="small" style="margin-top:10px;"><b>Tipos de falla:</b> SI = está fallando ahora (pide la descripción del error; abre incidente, Issue y correo) · NO = funciona bien (si venía de SI, cierra el incidente) · OCASIONALMENTE = bien, pero falla ~1 vez al mes · MUY INTERMITENTE = bien, pero con mucha intermitencia (p. ej. 5 veces al mes).</div></div>`;
 }
 function ambCfgView(){
   const c = ambCfgDraft || ambCfg;
   const inp = (k, v, ph, num) => `<input type="${num?'number':'text'}" data-f="ambCfg" data-k="${escapeHtml(k)}" ${num?'data-num="1" min="1"':''} value="${escapeHtml(v)}" placeholder="${escapeHtml(ph||'')}" />`;
   const resp = AMB_HOJAS.map(n => { const r = (c.resp && c.resp[n]) || {nombre:'',correo:''};
     return `<div class="rowgrid3"><div class="small" style="align-self:center;"><b>${escapeHtml(n)}</b></div><div>${inp('resp.' + n + '.nombre', r.nombre, 'Nombre del responsable')}</div><div>${inp('resp.' + n + '.correo', r.correo, 'correo@bancofinandina.com')}</div></div>`; }).join('');
-  return `<div class="panel"><div class="panel-head"><div><h2>Configuración de Ambientes</h2><p class="hint">Destinatarios, enlaces y responsables que usan los correos y los datos del Issue. Se comparte con todo el equipo.</p></div>
+  return `<div class="panel"><div class="panel-head"><div><h2>Configuración de Ambientes ${ambEnvName()}</h2><p class="hint">Destinatarios, enlaces y responsables que usan los correos y los datos del Issue. Se comparte con todo el equipo.</p></div>
       <div class="flexrow"><button class="btn btn-sm btn-ghost" data-act="amb-cfg-defaults" type="button">Valores originales</button><button class="btn btn-sm" data-act="amb-cfg-reset" type="button">Deshacer cambios</button><button class="btn btn-sm btn-primary" data-act="amb-cfg-save" type="button">Guardar</button></div></div>
     ${ambSrvStatusHtml()}
     <label class="field-label">Correos de destino (separados por coma)</label><textarea data-f="ambCfg" data-k="correos" rows="3">${escapeHtml(c.correos)}</textarea>
@@ -4764,12 +4973,13 @@ function ambCfgView(){
     <div class="rowgrid" style="margin-top:8px;"><div><label class="field-label">Etiqueta (Tags)</label>${inp('azure.etiqueta', c.azure.etiqueta)}</div><div><label class="field-label">Flujo funcional</label>${inp('azure.flujo', c.azure.flujo)}</div></div>
     <div class="rowgrid" style="margin-top:8px;"><div><label class="field-label">Estado al cerrar el Issue</label>${inp('azure.estadoCierre', c.azure.estadoCierre || 'Cerrado')}</div><div><label class="field-label">Organización de Azure DevOps</label>${inp('azure.org', c.azure.org)}</div></div>
     <h3 style="margin:18px 0 6px;font-size:14px;">Responsable por hoja</h3>${resp}
-    <h3 style="margin:18px 0 6px;font-size:14px;">Datos del Excel</h3>
-    <div class="flexrow"><button class="btn btn-sm" data-act="amb-replace" type="button">${ambReplace ? 'Cancelar' : 'Reemplazar con otro Excel'}</button></div>
+    ${ambEnv==='dev' ? '' : '<h3 style="margin:18px 0 6px;font-size:14px;">Datos del Excel</h3>'}
+    ${ambEnv==='dev' ? '<div class="small">Los ambientes DEV se copian de los de QA; no se cargan desde Excel.</div>' : `<div class="flexrow"><button class="btn btn-sm" data-act="amb-replace" type="button">${ambReplace ? 'Cancelar' : 'Reemplazar con otro Excel'}</button></div>`}
     ${ambReplace ? `<div class="delbox" style="margin-top:8px;"><span>Se borran las hojas y el histórico actuales para todo el equipo y se cargan los del nuevo archivo.</span><label class="btn btn-sm btn-primary" for="ambFileInput" style="cursor:pointer;">Elegir Excel y reemplazar</label><input type="file" id="ambFileInput" accept=".xlsx,.xlsm,.xlsb,.xls" hidden /></div>` : ''}
     ${ambProg ? ambProgHtml() : ''}${ambImportMsg ? `<div class="small" style="margin-top:8px;">${escapeHtml(ambImportMsg)}</div>` : ''}</div>`;
 }
 function viewAmbientes(){
+  ambApply();
   if(!ambHojas.length) return ambEmpty();
   if(!ambTab || (ambTab!=='historico' && ambTab!=='generales' && ambTab!=='config' && !ambHojas.some(h => h.id===ambTab))) ambTab = ambHojas[0].id;
   const incs = ambOpenList();
@@ -4778,12 +4988,13 @@ function viewAmbientes(){
   else if(ambTab==='generales') body = ambGeneralesView();
   else if(ambTab==='config') body = ambCfgView();
   else body = ambHojaView(ambHojas.find(h => h.id===ambTab));
-  return `${ambProg && ambTab!=='config' ? `<div class="panel">${ambProgHtml()}</div>` : ''}${ambNoticePanel()}${ambIncidentsPanel(incs)}<div class="panel tight" style="padding-bottom:6px;">${ambSubtabs(incs)}</div>${body}`;
+  return `${ambProg && ambTab!=='config' ? `<div class="panel">${ambProgHtml()}</div>` : ''}${ambNoticePanel()}${ambSiPanel()}${ambIncidentsPanel(incs)}<div class="panel tight" style="padding-bottom:6px;">${ambEnvTabs()}${ambSubtabs(incs)}</div>${body}`;
 }
 function ambTableroPanel(){
+  ambApply();
   const n = ambOpenCount(); if(!ambHojas.length || !n) return '';
   const due = ambOpenList().filter(i => i.vencido).length;
-  return `<div class="panel tight"><div class="panel-head" style="margin-bottom:0;"><div><h2>Ambientes QA</h2><p class="hint">${n} incidente${n===1?'':'s'} abierto${n===1?'':'s'}${due ? ' · ' + due + ' con recordatorio pendiente' : ''}</p></div><button class="btn btn-sm" data-act="tab" data-tab="ambientes" type="button">Abrir ambientes</button></div></div>`;
+  return `<div class="panel tight"><div class="panel-head" style="margin-bottom:0;"><div><h2>Ambientes ${ambEnvName()}</h2><p class="hint">${n} incidente${n===1?'':'s'} abierto${n===1?'':'s'}${due ? ' · ' + due + ' con recordatorio pendiente' : ''}</p></div><button class="btn btn-sm" data-act="tab" data-tab="ambientes" type="button">Abrir ambientes</button></div></div>`;
 }
 
 /* ---------- Cargue de proyectos en QA (solo administrador, versión web): Drive / archivo → HU → IA → Azure DevOps ---------- */
@@ -5114,7 +5325,7 @@ function azMaybeSync(p){
 }
 async function azTest(){
   const p = currentProject(); if(!p) return;
-  if(!azForm || azForm.pid!==p.id) azForm = azNew(p);
+  if(!azForm || azForm.pid!==p.id) azForm = azNew(p, 0);
   const c = azCfgFrom(azForm), pr = azCfgProblem(c);
   if(pr){ azForm.error = pr; azForm.preview = null; render(); return; }
   azForm.busy = 'test'; azForm.error = ''; azForm.preview = null; render();
@@ -5124,11 +5335,17 @@ async function azTest(){
 }
 async function azSave(){
   const p = currentProject(); if(!p) return;
-  if(!azForm || azForm.pid!==p.id) azForm = azNew(p);
+  if(!azForm || azForm.pid!==p.id) azForm = azNew(p, 0);
   const c = azCfgFrom(azForm), pr = azCfgProblem(c);
   if(pr){ azForm.error = pr; render(); return; }
+  const idx = azForm.idx==null ? 0 : azForm.idx;
   azForm.busy = 'save'; azForm.error = ''; render();
-  await patchProject(np => { np.azureCfg = c; });
+  await patchProject(np => {
+    if(idx===0 || !np.azureCfg){ np.azureCfg = c; return; }
+    np.azureCfgExtra = Array.isArray(np.azureCfgExtra) ? np.azureCfgExtra : [];
+    if(idx>0 && idx <= np.azureCfgExtra.length) np.azureCfgExtra[idx-1] = c;
+    else if(np.azureCfgExtra.length < AZ_MAX_EXTRA) np.azureCfgExtra.push(c);
+  });
   azForm = null; render();
   const np = projects.find(x => x.id===p.id); if(np) await azSync(np, true);
 }
@@ -5248,7 +5465,11 @@ function addBug(s){
   const n = (($('#bugNote') && $('#bugNote').value) || '').trim().slice(0,80);
   if(!id){ toast('Escribe el número del bug'); return; }
   const x = slotOf(s); if(!x) return;
-  x.bugs.push({id, min, n}); queueSave(curKey()); bit.bugForm = null; render();
+  const pn = (($('#bugPj') && $('#bugPj').value) || '').trim().slice(0,120), u = bugSafeUrl($('#bugUrl') && $('#bugUrl').value);
+  if((($('#bugUrl') && $('#bugUrl').value) || '').trim() && !u){ toast('El enlace del bug debe empezar por https://'); return; }
+  const pr = pn ? projects.find(p => p.name.trim().toLowerCase()===pn.toLowerCase()) : null;
+  const bug = {id, min, n}; if(pn) bug.pn = pr ? pr.name : pn; if(pr) bug.pid = pr.id; if(u) bug.u = u;
+  x.bugs.push(bug); queueSave(curKey()); bit.bugForm = null; render();
 }
 
 
@@ -5579,17 +5800,26 @@ function onClick(e){
       }).then(() => toast('Avance de pruebas guardado')); break;
     }
     case 'az-sync': { const ap = currentProject(); if(ap) azSync(ap, true); break; }
-    case 'az-edit': { const ap = currentProject(); if(ap){ azForm = azNew(ap); render(); } break; }
+    case 'az-edit': { const ap = currentProject(); if(ap){ azForm = azNew(ap, Number(el.dataset.i)||0); render(); } break; }
+    case 'az-add': { const ap = currentProject(); if(ap && azQueries(ap).length < 1 + AZ_MAX_EXTRA){ azForm = azNew(ap, -1); render(); } break; }
     case 'az-cancel': azForm = null; render(); break;
     case 'az-test': azTest(); break;
     case 'az-save': azSave(); break;
-    case 'az-unlink': patchProject(np => { delete np.azureCfg; }).then(() => { azForm = null; delete azMsg[currentProject() ? currentProject().id : '']; render(); toast('Vínculo con Azure quitado'); }); break;
+    case 'az-unlink': { const i = Number(el.dataset.i)||0;
+      patchProject(np => {
+        const ex = Array.isArray(np.azureCfgExtra) ? np.azureCfgExtra : [];
+        if(i===0){ if(ex.length){ np.azureCfg = ex.shift(); np.azureCfgExtra = ex; } else { delete np.azureCfg; delete np.azureCfgExtra; } }
+        else { ex.splice(i-1, 1); if(ex.length) np.azureCfgExtra = ex; else delete np.azureCfgExtra; }
+      }).then(() => { azForm = null; const cp = currentProject(); if(cp) delete azMsg[cp.id]; render(); toast('Consulta de Azure quitada'); const np2 = currentProject(); if(np2 && np2.azureCfg) azSync(np2, true); }); break; }
     case 'cert-use-azure': certUseAzure(); break;
     case 'seg-full': currentView = 'cerrados'; selectedProjectId = null; fullSegId = el.dataset.id; fullSegFilter = ''; mode = null; work = null; certDraft = null; render(); window.scrollTo(0,0); break;
     case 'seg-full-close': fullSegId = null; render(); break;
     case 'seg-filter': fullSegFilter = el.dataset.k || ''; render(); break;
     case 'seg-download': exportNovedades(el.dataset.id); break;
     case 'report-pdf': exportReport(el.dataset.id); break;
+    case 'projq-next': pqGo(1); break;
+    case 'projq-prev': pqGo(-1); break;
+    case 'projq-clear': projQ = ''; projQIdx = 0; render(); { const i = $('#projQ'); if(i) i.focus(); } break;
     case 'back': critForm = null; qaEdit = null; fullSegId = null; selectedProjectId = null; mode = null; work = null; certDraft = null; render(); break;
     case 'edit-start': { const p = currentProject(); if(!p) break; work = cloneJ(p.historias); mode = 'edit'; render(); break; }
     case 'edit-cancel': mode = null; work = null; render(); break;
@@ -5703,6 +5933,7 @@ function onInput(e){
   if(!roleAllowsField(f)) return;
   if(roleInput(f, el)) return;
   if(bitInput(f, el)) return;
+  if(f==='projQ'){ projQ = el.value; projQIdx = 0; render(); return; }
   if(f.indexOf('amb')===0){ ambInput(f, el); return; }
   if(f.indexOf('car')===0 && (f==='carRaiz' || f==='carUpProy')){ carInput(f, el); return; }
   if(el.tagName==='SELECT' || el.type==='checkbox') return;   // se manejan en 'change'
@@ -5736,7 +5967,7 @@ function onInput(e){
     case 'az': azure[el.dataset.k] = el.value; updateWiql(); break;
     case 'tpf': { if(tpForm){ tpForm[el.dataset.k] = el.value; tpForm.preview = null; tpForm.error = ''; } break; }
     case 'pru': { if(pruForm){ pruForm[el.dataset.k] = el.value; const lv = document.getElementById('pruLive'); if(lv) lv.innerHTML = pruLiveHtml(pruCalc(pruForm)); } break; }
-    case 'azl': { const ap = currentProject(); if(!ap) break; if(!azForm || azForm.pid!==ap.id) azForm = azNew(ap); azForm[el.dataset.k] = el.value; azForm.preview = null; azForm.error = ''; break; }
+    case 'azl': { const ap = currentProject(); if(!ap) break; if(!azForm || azForm.pid!==ap.id) azForm = azNew(ap, 0); azForm[el.dataset.k] = el.value; azForm.preview = null; azForm.error = ''; break; }
     case 'newAnalyst': bit.newName = el.value; break;
     case 'slotD': { const x = slotOf(el.dataset.s); if(x){ x.d = el.value; queueSave(curKey()); } break; }
     case 'extrasNota': if(bit.analystId){ ensureDay(bit.analystId, bit.date).extrasNota = el.value; queueSave(curKey()); } break;
@@ -5785,7 +6016,7 @@ function onKeydown(e){
   const t = e.target;
   if(e.key==='Enter'){
     if(t.id==='newAnalyst'){ e.preventDefault(); addAnalyst(); return; }
-    if(t.id==='bugId' || t.id==='bugMin' || t.id==='bugNote'){ e.preventDefault(); if(bit.bugForm) addBug(bit.bugForm); return; }
+    if(t.id==='bugId' || t.id==='bugMin' || t.id==='bugNote' || t.id==='bugPj' || t.id==='bugUrl'){ e.preventDefault(); if(bit.bugForm) addBug(bit.bugForm); return; }
   }
   if((e.key==='Enter' || e.key===' ') && t.getAttribute && t.getAttribute('role')==='button' && t.dataset.act){ e.preventDefault(); t.click(); }
 }

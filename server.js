@@ -514,7 +514,7 @@ app.post('/api/admin/restore', adminOnly, wrap(async (req, res) => {
 }));
 
 /* ---------- Ambientes QA: estado de una fila → histórico + Issue en Azure + correo ---------- */
-const ambOk = (req, res, next) => ['admin', 'analista', 'po', 'ambientes'].includes(req.user.role) ? next() : res.status(403).json({ error: 'Tu perfil no gestiona los ambientes.' });
+const ambOk = (req, res, next) => perm.AMB_ROLES.includes(req.user.role) ? next() : res.status(403).json({ error: 'Tu perfil no gestiona los ambientes.' });
 const ambHits = new Map();
 function ambRate(uid) {
   const now = Date.now(), arr = (ambHits.get(uid) || []).filter(t => now - t < 300000);
@@ -529,6 +529,9 @@ app.post('/api/ambientes/marcar', ambOk, wrap(async (req, res) => {
 app.post('/api/ambientes/reintentar', ambOk, wrap(async (req, res) => {
   if (!ambRate(req.user.id)) return res.status(429).json({ error: 'Demasiados intentos seguidos; espera unos minutos.' });
   try { res.json(await ambientes.reintentar(req.user, req.body && req.body.id, broadcast)); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
+}));
+app.post('/api/ambientes/duplicar-dev', adminOnly, wrap(async (req, res) => {
+  try { res.json(await ambientes.duplicarDev(req.user, broadcast)); } catch (e) { if (e && e.status && e.msg) return fail(res, e); throw e; }
 }));
 app.post('/api/ambientes/probar-correo', adminOnly, wrap(async (req, res) => {
   if (!ambRate(req.user.id)) return res.status(429).json({ error: 'Demasiados intentos seguidos; espera unos minutos.' });
